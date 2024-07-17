@@ -1,0 +1,12 @@
+[package]
+name = "libi2a"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+imageproc = "0.25.0"
+ab_glyph = "0.2"
+rayon = "1.10.0"
+
+[lib]
+name = "libi2a"

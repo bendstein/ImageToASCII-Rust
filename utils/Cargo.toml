@@ -1,0 +1,10 @@
+[package]
+name = "utils"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+imageproc = "0.25.0"
+
+[lib]
+name = "utils"
