@@ -139,6 +139,8 @@ pub mod data {
         for line in data {
             writer.write_all(line.as_bytes())
                 .map_err(|err| format!("Failed to write training data. {err}"))?;
+            writer.write(b"\n")
+                .map_err(|err| format!("Failed to write training data. {err}"))?;
         }
 
         Ok(())

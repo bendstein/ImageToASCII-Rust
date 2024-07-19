@@ -8,11 +8,12 @@
             "name": "Console",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/target/debug/driver.exe",
+            "program": "${workspaceFolder}/target/debug/train_model.exe",
             "preLaunchTask": "rust: cargo build",
             "args": [
-                "C:/Users/benjo/Pictures/test.png",
-                "--no-color"
+                "models/model.bin",
+                "--source",
+                "C:/Users/benjo/Documents/repos/rust/image_to_ascii/target/release/preprocessed/preprocessed.txt"
             ],
             "cwd": "${workspaceFolder}/target/debug",
             "console": "integratedTerminal"
