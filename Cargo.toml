@@ -2,8 +2,11 @@
 members = [
     "libi2a",
     "utils",
-    "driver"
+    "render_ascii",
+    "train_model",
+    "preprocess_images"
 ]
+resolver = "2"
 
 [workspace.package]
 version = "0.0.1"

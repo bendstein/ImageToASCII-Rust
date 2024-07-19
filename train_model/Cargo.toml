@@ -1,0 +1,8 @@
+[package]
+name = "train_model"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+libi2a = { version = "0.0.1", path = "../libi2a"}
+utils = { version = "0.0.1", path = "../utils"}

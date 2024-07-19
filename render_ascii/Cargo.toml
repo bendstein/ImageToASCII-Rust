@@ -1,0 +1,11 @@
+[package]
+name = "render_ascii"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+libi2a = { version = "0.0.1", path = "../libi2a"}
+utils = { version = "0.0.1", path = "../utils"}
+imageproc = "0.25.0"
+ab_glyph = "0.2"
+colored = { version = "2.0.0" }
