@@ -1,30 +1,17 @@
+use std::io::BufRead;
+
 use libi2a::converter::model::{Model, ModelConverter, ModelInitParams, ModelTrainingExample, ModelTrainingParams};
 
 const ARG_PATH: &str = "--path";
-const TILE_SIZE_MIN: u32 = 1;
-const TILE_SIZE_DFT: u32 = 8;
-const HIDDEN_LAYER_DFT: u32 = 1;
-const HIDDEN_LAYER_MIN: u32 = 0;
-const HIDDEN_NODES_DFT: u32 = 16;
-const HIDDEN_NODES_MIN: u32 = 1;
-const ALPHA_DFT: f32 = 0_f32;
-const ALPHA_MIN: f32 = 0_f32;
-const LEARNING_RATE_MIN: f32 = 0e-8_f32;
-const LEARNING_RATE_DFT: f32 = 0.01_f32;
-const BATCH_SIZE_DFT: u32 = 1;
-const BATCH_SIZE_MIN: u32 = 1;
-const LAMBDA_DFT: f32 = 0_f32;
-const LAMBDA_MIN: f32 = 0_f32;
-const ADAM_BETA1_DFT: f32 = 0.99_f32;
-const ADAM_BETA1_MIN: f32 = 0e-8_f32;
-const ADAM_BETA2_DFT: f32 = 0.999_f32;
-const ADAM_BETA2_MIN: f32 = 0e-8_f32;
+const CFG_PATH: &str = "config.toml";
 
 fn main() -> Result<(), String> {    
     if let Ok(mut exe) = std::env::current_exe() {
         exe.pop();
         _ = std::env::set_current_dir(exe);
     }
+
+    let config = utils::config::read_config(CFG_PATH)?;
 
     let args = utils::command_line::parse_args(std::env::args(), Some(String::from(ARG_PATH)))?;
     
@@ -53,39 +40,14 @@ fn main() -> Result<(), String> {
         Model::load_from_file(&path)?
     } else {
         //Get list of glyphs
-        let glyphs: Vec<char> = utils::glyph::get_glyphs(true, 255_u8)
-            .iter()
-            .filter(|c| c.is_ascii())
-            .copied()
-            .collect();
+        let glyphs: Vec<char> = config.general.glyphs;
         
-        //Read params from args or use defaults
-        let tile_size = u32::max(TILE_SIZE_MIN, match args.get("--tile-size") {
-            Some(Some(p)) => p.parse::<u32>().map_err(|err| format!("Invalid tile size. {err}")),
-            _ => Ok(TILE_SIZE_DFT)
-        }?);
-
-        let hidden_layers = u32::max(HIDDEN_LAYER_MIN, match args.get("--hidden-layers") {
-            Some(Some(p)) => p.parse::<u32>().map_err(|err| format!("Invalid number of hidden layers. {err}")),
-            _ => Ok(HIDDEN_LAYER_DFT)
-        }?);
-
-        let hidden_neurons = u32::max(HIDDEN_NODES_MIN, match args.get("--hidden-neurons") {
-            Some(Some(p)) => p.parse::<u32>().map_err(|err| format!("Invalid number of hidden neurons. {err}")),
-            _ => Ok(HIDDEN_NODES_DFT)
-        }?);
-
-        let alpha = f32::max(ALPHA_MIN, match args.get("--alpha") {
-            Some(Some(p)) => p.parse::<f32>().map_err(|err| format!("Invalid leaky ReLU alpha. {err}")),
-            _ => Ok(ALPHA_DFT)
-        }?);
-
         Model::init_from_params(ModelInitParams {
             glyphs,
-            feature_count: tile_size * tile_size,
-            hidden_layer_count: hidden_layers,
-            hidden_layer_neuron_count: hidden_neurons,
-            alpha
+            feature_count: config.ssim.tile_size * config.ssim.tile_size,
+            hidden_layer_count: config.training.hidden_layers,
+            hidden_layer_neuron_count: config.training.hidden_neurons,
+            alpha: config.training.alpha
         })
     };
 
@@ -108,41 +70,40 @@ fn main() -> Result<(), String> {
             .map_err(|e| format!("Failed to save model: {e}"))
     };
 
-    let training_data_bound = utils::data::read_training_data(&source)?;
-    let mut training_data = training_data_bound
-        .iter()
+    let reader = std::io::BufReader::new(std::fs::File::open(source)
+        .map_err(|err| format!("Failed to open source file. {err}"))?);
+
+    let mut training_data = reader.lines()
+        .flat_map(|line| {
+            if let Err(e) = line {
+                return Err(format!("Failed to read line. {e}"));
+            }
+
+            let line = line.unwrap();
+
+            let parts: Vec<&str> = line.split(';').collect();
+
+            if parts.len() != 2 {
+                return Err(format!("Invalid training data line {line}"));
+            }
+
+            let features: Vec<f32> = parts[0].split(',')
+                .map(|p| p.parse::<f32>().unwrap_or(0_f32))
+                .collect();
+
+            let outputs: Vec<f32> = parts[1].split(',')
+                .map(|p| p.parse::<f32>().unwrap_or(0_f32))
+                .collect();
+
+            Ok((features, outputs))
+        })
         .map(|(features, outputs)| ModelTrainingExample::new(features.clone(), outputs.clone()));
 
-    let learning_rate = f32::max(LEARNING_RATE_MIN, match args.get("--learning-rate") {
-        Some(Some(p)) => p.parse::<f32>().map_err(|err| format!("Invalid learning rate. {err}")),
-        _ => Ok(LEARNING_RATE_DFT)
-    }?);
-
-    let lambda = f32::max(LAMBDA_MIN, match args.get("--l2") {
-        Some(Some(p)) => p.parse::<f32>().map_err(|err| format!("Invalid L2 Regularization coefficient. {err}")),
-        _ => Ok(LAMBDA_DFT)
-    }?);
-
-    let adam_beta1 = f32::max(ADAM_BETA1_MIN, match args.get("--adam-1") {
-        Some(Some(p)) => p.parse::<f32>().map_err(|err| format!("Invalid adam beta 1. {err}")),
-        _ => Ok(ADAM_BETA1_DFT)
-    }?);
-
-    let adam_beta2 = f32::max(ADAM_BETA2_MIN, match args.get("--adam-2") {
-        Some(Some(p)) => p.parse::<f32>().map_err(|err| format!("Invalid adam beta 1. {err}")),
-        _ => Ok(ADAM_BETA2_DFT)
-    }?);
-
-    let batch_size = u32::max(BATCH_SIZE_MIN, match args.get("--batch-size") {
-        Some(Some(p)) => p.parse::<u32>().map_err(|err| format!("Invalid batch size. {err}")),
-        _ => Ok(BATCH_SIZE_DFT)
-    }?);
-
     let training_params = ModelTrainingParams {
-        learning_rate,
-        batch_size,
-        lambda,
-        adam: (adam_beta1, adam_beta2)
+        learning_rate: config.training.learning_rate,
+        batch_size: config.training.batch_size,
+        lambda: config.training.l2,
+        adam: (config.training.adam_beta1, config.training.adam_beta2)
     };
 
     //Train model

@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 imageproc = "0.25.0"
+toml = "0.8.15"
+serde = { version = "1.0.204", features = ["derive"] }
 
 [lib]
 name = "utils"

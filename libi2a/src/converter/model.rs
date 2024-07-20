@@ -1,10 +1,11 @@
 use std::mem::size_of;
 
+use imageproc::image::GenericImageView;
 use nalgebra::{DMatrix, DVector};
 use rand_distr::Distribution;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
-use super::Converter;
+use super::{converter_utils, Converter};
 
 #[derive(Clone)]
 pub struct Model {
@@ -81,8 +82,8 @@ impl ModelConverter {
         }
 
         let mut epoch = 0;
-        let mut model = model_initial;
-        let mut adam = Adam::new(params.learning_rate, params.adam.0, params.adam.1, model);
+        let mut model = model_initial.clone();
+        let mut adam = Adam::new(params.learning_rate, params.adam.0, params.adam.1, model_initial);
 
         loop {
             //Get next batch of training examples
@@ -117,52 +118,155 @@ impl ModelConverter {
 
             //Calculate class weights using complement of logistic function
             const K: f32 = 8_f32;
-            const C: f32 = 0.4_f32;
+            const C: f32 = 0.5_f32;
+
+            let logit = |s: f32| 1_f32 / (1_f32 + (-K * (s - C)).exp());
 
             let class_weights = batch_ssim_freq
-                .map(|s| 1_f32 - (1_f32 / (1_f32 + (-K * (s - C)).exp()) + 1_f32 / (1_f32 + (K * C).exp())));
+                .map(|s| 1_f32 - logit(s) + logit(0_f32));
 
             //Propagate forwards
             let activations = batch.par_iter()
                 .map(|example| {
-                    let activations = Self::propagate_forwards(model, example.clone());
+                    let activations = Self::propagate_forwards(&model, example.clone());
+
+                    //Get last layer
+                    let output = activations.last().unwrap();
 
                     //Compare the activations to the expected value
                     let expected = example.normalized_ssims();
 
                     //Calculate total loss using (weighted) cross-entropy loss
-                    let loss = -expected.dot(&activations.map(|a| a.ln()).component_mul(&class_weights));
+                    let loss = -expected.dot(&output.map(|a| a.ln()).component_mul(&class_weights));
 
                     //Calculate component loss using binary cross-entropy loss
-                    let component_loss = (expected.component_mul(&activations.map(|a| a.ln()))
-                        + expected.map(|e| 1_f32 - e).component_mul(&activations.map(|a| 1_f32 - a).map(|a| a.ln())))
+                    let component_loss = (expected.component_mul(&output.map(|a| a.ln()))
+                        + expected.map(|e| 1_f32 - e).component_mul(&output.map(|a| 1_f32 - a).map(|a| a.ln())))
                         .component_mul(&class_weights);
 
                     //Return activations, total loss, and pointwise loss
                     (activations, loss, component_loss)
                 })
-                .collect::<Vec<(DVector<f32>, f32, DVector<f32>)>>();
+                .collect::<Vec<(Vec<DVector<f32>>, f32, DVector<f32>)>>();
 
             //Get average batch loss
+            let avg_loss = activations.iter()
+                .map(|(_, loss, _)| loss).sum::<f32>() 
+                / params.batch_size as f32;
 
+            log(format!("Epoch {epoch} - Average loss: {avg_loss}"), false);
+
+            // //Get average pointwise loss across each batch
+            // let avg_pointwise_loss = activations.iter()
+            //     .map(|(_, _, pointwise)| pointwise)
+            //     .fold(DVector::zeros(model.glyphs.len()), |acc, pointwise| acc + pointwise)
+            //     .map(|p| p / params.batch_size as f32);
+
+            //Propagate backwards
+            let gradients = batch.par_iter()
+                .zip(activations)
+                .map(|(example, (activations, _, _))| 
+                    Self::propagate_backwards(&model, example.clone(), activations, class_weights.clone()))
+                .collect::<Vec<(Vec<DMatrix<f32>>, Vec<DVector<f32>>)>>();
+
+            //Average weights and biases across all trials
+            let first_trial_gradients = gradients.first().unwrap();
+            let mut average_weight_gradients = Vec::<DMatrix<f32>>::new();
+            let mut average_bias_gradients = Vec::<DVector<f32>>::new();
+
+            for l in 0..first_trial_gradients.0.len() {
+                let mut weight = DMatrix::zeros(first_trial_gradients.0[l].nrows(), first_trial_gradients.0[l].ncols());
+                let mut bias = DVector::zeros(first_trial_gradients.1[l].nrows());
+
+                for (gweight, gbias) in gradients.iter() {
+                    weight += &gweight[l];
+                    bias += &gbias[l];
+                }
+
+                average_weight_gradients.push(weight / params.batch_size as f32);
+                average_bias_gradients.push(bias / params.batch_size as f32);
+            }
+
+            //Update weights using Adam
+            model = Self::update_adam_weights(&mut adam, &model, (average_weight_gradients, average_bias_gradients), params.lambda, epoch);
 
             //Increment epoch counter
             epoch += 1;
 
             //Save model after each epoch
-            on_epoch_complete(model)?;
+            on_epoch_complete(&model)?;
         }
 
-        Ok(model.clone())
+        Ok(model)
     }
 
-    fn propagate_forwards(model: &Model, example: ModelTrainingExample) -> DVector<f32> {
-        todo!()
+    fn propagate_forwards(model: &Model, example: ModelTrainingExample) -> Vec<DVector<f32>> {
+        let neurons = example.normalized_intensities();
+        let mut activations = vec![neurons];
+
+        for l in 0..model.weights.len() {
+            let weights = &model.weights[l];
+            let biases = &model.biases[l];
+
+            //Take dot product of weights and neurons, and add bias to get activation inputs
+            let weighted_sum = weights * &activations[l] + biases;
+
+            if l == model.weights.len() - 1 {
+                //Output layer - Softmax
+                activations.push(Self::normalized_softmax(weighted_sum));
+            }
+            else {
+                //Hidden layer - Leaky ReLU
+                activations.push(weighted_sum.map(|a| if a < 0_f32 { model.alpha * a } else { a }));
+            }
+        }
+
+        activations
     }
 
     fn propagate_backwards(model: &Model, example: ModelTrainingExample, 
         activations: Vec<DVector<f32>>, class_weights: DVector<f32>) -> (Vec<DMatrix<f32>>, Vec<DVector<f32>>) {
-        todo!()
+        let expected = example.normalized_ssims();
+        let mut all_weight_gradients = Vec::<DMatrix<f32>>::new();
+        let mut all_bias_gradients = Vec::<DVector<f32>>::new();
+        let mut all_errors = Vec::<DVector<f32>>::new();
+        
+        //Init vectors
+        for l in 0..model.weights.len() {
+            all_weight_gradients.push(DMatrix::zeros(model.weights[l].nrows(), model.weights[l].ncols()));
+            all_bias_gradients.push(DVector::zeros(model.biases[l].nrows()));
+            all_errors.push(DVector::zeros(model.weights[l].ncols()));
+        }
+
+        for l in (0..model.weights.len()).rev() {
+            let neurons = &activations[l];
+            
+            let error_term = if l == model.weights.len() - 1 {
+                //Gradient of cross-entropy loss wrt softmax activation simplifies to predicted - expected
+                //Multiply by class weights
+                (neurons - &expected).component_mul(&class_weights)
+            }
+            else {
+                //Get weights and error terms for next layer
+                let next_weights = &model.weights[l + 1];
+                let next_errors = all_errors.last().unwrap();
+
+                //Using chain rule, error term is the transpose of the next layer's weights times it's error term,
+                //times the derivative of Leaky ReLU
+                (next_weights.transpose() * next_errors)
+                    .component_mul(&neurons.map(|a| if a < 0_f32 { model.alpha } else { 1_f32 }))
+            };
+
+            //Grad of loss wrt bias is just error
+            all_bias_gradients[l] = error_term.clone();
+
+            //Grad of loss wrt weights is error * prev activations transpose (chain rule)
+            all_weight_gradients[l] = error_term.clone() * activations[l].transpose();
+
+            all_errors[l] = error_term;
+        }
+
+        (all_weight_gradients, all_bias_gradients)
     }
 
     fn update_adam_weights(adam: &mut Adam, model: &Model, gradients: (Vec<DMatrix<f32>>, Vec<DVector<f32>>),
@@ -211,7 +315,33 @@ impl ModelConverter {
 
 impl Converter for ModelConverter {
     fn best_match(&self, tile: &imageproc::image::DynamicImage) -> char {
-        todo!()
+        //Get intensities of pixels in each tile
+        let intensities = tile.pixels().map(|p| converter_utils::get_intensity(p.2)).collect();
+        let example = ModelTrainingExample::new(intensities, vec![0_f32; self.model.glyphs.len()]);
+        
+        //Send tile through the neural net
+        let activations: Vec<DVector<f32>> = Self::propagate_forwards(&self.model, example);
+        
+        if activations.is_empty() {
+            return ' ';
+        }
+        
+        //Get output layer
+        let output = activations.last().unwrap();
+
+        //Get index of max value
+        let mut max_index = 0_usize;
+        let mut max_value = 0_f32;
+
+        for (i, &value) in output.iter().enumerate() {
+            if value > max_value {
+                max_value = value;
+                max_index = i;
+            }
+        }
+
+        //Get one-hot encoded glyph
+        self.model.glyphs[max_index] 
     }
     
     fn get_tile_size(&self) -> u32 {
@@ -265,7 +395,7 @@ impl Model {
 
         let mut rng = rand::thread_rng();
 
-        for i in 0..params.hidden_layer_count {
+        for i in 0..(params.hidden_layer_count + 1) {
             let activations_count = if i == 0 { params.glyphs.len() } else { params.hidden_layer_neuron_count as usize };
             let neuron_count = if i == 0 { params.feature_count } else { params.hidden_layer_neuron_count } as usize;
 
@@ -497,7 +627,7 @@ impl ModelTrainingExample {
     }
 
     pub fn normalized_ssims(&self) -> DVector<f32> {
-        const COERCE_TO_ZERO: f32 = 0.00001_f32;
+        const COERCE_TO_ZERO: f32 = 1e-9_f32;
         const STD_DEV: f32 = 0.15_f32;
 
         //Normalize ssims, gaussian weighted by their percentage of the max

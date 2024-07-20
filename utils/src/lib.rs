@@ -146,3 +146,47 @@ pub mod data {
         Ok(())
     }
 }
+
+pub mod config {
+    use serde::Deserialize;
+    
+    #[derive(Deserialize)]
+    pub struct Config {
+        pub general: GeneralConfig,
+        pub ssim: SSIMConfig,
+        pub training: TrainingConfig,
+    }
+
+    #[derive(Deserialize)]
+    pub struct GeneralConfig {
+        pub render_method: String,
+        pub glyphs: Vec<char>
+    }
+
+    #[derive(Deserialize)]
+    pub struct SSIMConfig {
+        pub subdivide: u32,
+        pub font: String,
+        pub tile_size: u32,
+    }
+
+    #[derive(Deserialize)]
+    pub struct TrainingConfig {
+        pub hidden_layers: u32,
+        pub hidden_neurons: u32,
+        pub alpha: f32,
+        pub l2: f32,
+        pub learning_rate: f32,
+        pub adam_beta1: f32,
+        pub adam_beta2: f32,
+        pub batch_size: u32
+    }
+
+    pub fn read_config(path: &str) -> Result<Config, String> {
+        let config = std::fs::read_to_string(path)
+            .map_err(|err| format!("Failed to read config. {err}"))?;
+
+        toml::from_str(&config)
+            .map_err(|err| format!("Failed to parse config. {err}"))
+    }
+}

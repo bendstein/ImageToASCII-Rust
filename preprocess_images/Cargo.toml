@@ -9,3 +9,4 @@ utils = { version = "0.0.1", path = "../utils"}
 imageproc = "0.25.0"
 ab_glyph = "0.2"
 colored = { version = "2.0.0" }
+toml = "0.8.15"
