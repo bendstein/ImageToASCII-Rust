@@ -17,11 +17,11 @@ font = "assets/CascadiaMono.ttf"
 
 [training]
 learning_rate = 0.05
-hidden_layers = 2
-hidden_neurons = 256
+hidden_layers = 1
+hidden_neurons = 64
 alpha = 0.075
-l2 = 0.05
+l2 = 0.075
 adam_beta1 = 0.9
 adam_beta2 = 0.999
-batch_size = 1024
-checkpoint_period = 5
+batch_size = 2048
+checkpoint_period = 100

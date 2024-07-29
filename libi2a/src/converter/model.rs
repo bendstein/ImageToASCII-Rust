@@ -57,6 +57,8 @@ pub struct Adam {
 
 impl ModelConverter {
     const ADAM_EPS: f64 = 1e-8_f64;
+    const GRADIENT_CLIP_MIN: f64 = -2.5_f64;
+    const GRADIENT_CLIP_MAX: f64 = 2.5_f64;
 
     pub fn new(model: Model) -> Self {
         Self {
@@ -305,10 +307,11 @@ impl ModelConverter {
                 Ok(error_term)
             }?;
 
-            //Grad of loss wrt bias is just error
-            all_bias_gradients[l] = error_term.clone();
+            //Grad of loss wrt bias is just error (clipped)
+            all_bias_gradients[l] = error_term.clone()
+                .map(|g| g.clamp(Self::GRADIENT_CLIP_MIN, Self::GRADIENT_CLIP_MAX));
 
-            //Grad of loss wrt weights is error * prev activations transpose (chain rule)
+            //Grad of loss wrt weights is error * prev activations transpose (chain rule/clipped)
             let activations = &activations[l];
             let mut activations_transpose: DMatrix<f64> = DMatrix::zeros(1, activations.len());
             for i in 0..activations.len() {
@@ -316,7 +319,8 @@ impl ModelConverter {
             }
 
             all_weight_gradients[l] = vmath::checked_mul_vm(&error_term, &activations_transpose)
-                .map_err(|e| format!("Failed to multiply error term and activations for weight gradient: {e}"))?;
+                .map_err(|e| format!("Failed to multiply error term and activations for weight gradient: {e}"))?
+                .map(|g| g.clamp(Self::GRADIENT_CLIP_MIN, Self::GRADIENT_CLIP_MAX));
 
             all_errors[l] = error_term;
         }
