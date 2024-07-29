@@ -65,7 +65,7 @@ impl ModelConverter {
     }
 
     pub fn train_model(model_initial: &Model, params: &ModelTrainingParams, examples: &mut dyn Iterator<Item=ModelTrainingExample>,
-        log: &dyn Fn(String, bool), on_epoch_complete: &dyn Fn(&Model) -> Result<(), String>) -> Result<Model, String> {
+        log: &dyn Fn(String, bool), on_epoch_complete: &dyn Fn(&Model, u32) -> Result<(), String>) -> Result<Model, String> {
         if model_initial.glyphs.is_empty() {
             return Err("Model has no glyphs".to_string());
         }
@@ -226,12 +226,12 @@ impl ModelConverter {
             model = Self::update_adam_weights(&mut adam, &model, (average_weight_gradients, average_bias_gradients), params.lambda, epoch)
                 .map_err(|e| format!("Failed to update weights. {e}"))?;
 
+            //Save model after each epoch
+            on_epoch_complete(&model, epoch)
+                .map_err(|e| format!("Failed to perform epoch-complete callback. {e}"))?;
+
             //Increment epoch counter
             epoch += 1;
-
-            //Save model after each epoch
-            on_epoch_complete(&model)
-                .map_err(|e| format!("Failed to perform epoch-complete callback. {e}"))?;
         }
 
         Ok(model)

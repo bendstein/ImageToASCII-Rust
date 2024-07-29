@@ -59,9 +59,18 @@ fn main() -> Result<(), String> {
         }
     }
 
-    let save_model = |model: &Model| -> Result<(), String> {
+    let save_model = |model: &Model, epoch: u32| -> Result<(), String> {        
+        //Save model checkpoint
+        if epoch > 0 && epoch % config.training.checkpoint_period == 0 {
+            log(String::from("Saving model checkpoint."), false);
+
+            model.save_to_file(format!("{path}.{epoch}.checkpoint").as_str())
+                .map_err(|e| format!("Failed to save model checkpoint: {e}"))?;
+        }
+
+        //Save model
         log(String::from("Saving model."), false);
-        
+
         model.save_to_file(&path)
             .map_err(|e| format!("Failed to save model: {e}"))
     };
@@ -114,7 +123,7 @@ fn main() -> Result<(), String> {
     let trained_model = ModelConverter::train_model(&model_initial, &training_params, &mut training_data, &log, &save_model)?;
 
     //Save trained model
-    save_model(&trained_model)?;
+    save_model(&trained_model, 0)?;
 
     Ok(())
 }

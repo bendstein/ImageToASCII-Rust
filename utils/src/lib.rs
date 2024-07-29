@@ -180,7 +180,8 @@ pub mod config {
         pub learning_rate: f64,
         pub adam_beta1: f64,
         pub adam_beta2: f64,
-        pub batch_size: u32
+        pub batch_size: u32,
+        pub checkpoint_period: u32
     }
 
     pub fn read_config(path: &str) -> Result<Config, String> {
