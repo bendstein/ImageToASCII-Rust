@@ -83,12 +83,12 @@ fn main() -> Result<(), String> {
                 return Err(format!("Invalid training data line {line}"));
             }
 
-            let features: Vec<f32> = parts[0].split(',')
-                .map(|p| p.parse::<f32>().unwrap_or(0_f32))
+            let features: Vec<f64> = parts[0].split(',')
+                .map(|p| p.parse::<f64>().unwrap_or(0_f64))
                 .collect();
 
-            let outputs: Vec<f32> = parts[1].split(',')
-                .map(|p| p.parse::<f32>().unwrap_or(0_f32))
+            let outputs: Vec<f64> = parts[1].split(',')
+                .map(|p| p.parse::<f64>().unwrap_or(0_f64))
                 .collect();
 
             if features.len() != model_initial.feature_count() {

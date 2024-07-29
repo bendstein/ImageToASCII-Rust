@@ -70,7 +70,7 @@ pub mod glyph {
 pub mod data {
     use std::io::{BufWriter, Write};
 
-    type Data = (Vec<f32>, Vec<f32>);
+    type Data = (Vec<f64>, Vec<f64>);
 
     pub fn read_training_data(path: &str) -> Result<Vec<Data>, String> {
         Ok(std::fs::read_to_string(path)
@@ -83,12 +83,12 @@ pub mod data {
                     return Err(format!("Invalid training data line {line}"));
                 }
 
-                let features: Vec<f32> = parts[0].split(',')
-                    .map(|p| p.parse::<f32>().unwrap_or(0_f32))
+                let features: Vec<f64> = parts[0].split(',')
+                    .map(|p| p.parse::<f64>().unwrap_or(0_f64))
                     .collect();
 
-                let outputs: Vec<f32> = parts[1].split(',')
-                    .map(|p| p.parse::<f32>().unwrap_or(0_f32))
+                let outputs: Vec<f64> = parts[1].split(',')
+                    .map(|p| p.parse::<f64>().unwrap_or(0_f64))
                     .collect();
 
                 Ok((features, outputs))
@@ -175,11 +175,11 @@ pub mod config {
     pub struct TrainingConfig {
         pub hidden_layers: u32,
         pub hidden_neurons: u32,
-        pub alpha: f32,
-        pub l2: f32,
-        pub learning_rate: f32,
-        pub adam_beta1: f32,
-        pub adam_beta2: f32,
+        pub alpha: f64,
+        pub l2: f64,
+        pub learning_rate: f64,
+        pub adam_beta1: f64,
+        pub adam_beta2: f64,
         pub batch_size: u32
     }
 
@@ -194,7 +194,7 @@ pub mod config {
 
 pub mod vmath {
     //Implement a function that performs checked addition on 2 DMatrix
-    pub fn checked_add(a: &nalgebra::DMatrix<f32>, b: &nalgebra::DMatrix<f32>) -> Result<nalgebra::DMatrix<f32>, String> {
+    pub fn checked_add(a: &nalgebra::DMatrix<f64>, b: &nalgebra::DMatrix<f64>) -> Result<nalgebra::DMatrix<f64>, String> {
         if a.nrows() != b.nrows() || a.ncols() != b.ncols() {
             return Err(format!("Matrix dimensions do not match. ({}x{} vs {}x{})", a.nrows(), a.ncols(), b.nrows(), b.ncols()));
         }
@@ -203,7 +203,7 @@ pub mod vmath {
     }
 
     //Implement a function that performs checked subtraction on 2 DMatrix
-    pub fn checked_sub(a: &nalgebra::DMatrix<f32>, b: &nalgebra::DMatrix<f32>) -> Result<nalgebra::DMatrix<f32>, String> {
+    pub fn checked_sub(a: &nalgebra::DMatrix<f64>, b: &nalgebra::DMatrix<f64>) -> Result<nalgebra::DMatrix<f64>, String> {
         if a.nrows() != b.nrows() || a.ncols() != b.ncols() {
             return Err(format!("Matrix dimensions do not match. ({}x{} vs {}x{})", a.nrows(), a.ncols(), b.nrows(), b.ncols()));
         }
@@ -212,7 +212,7 @@ pub mod vmath {
     }
 
     //Implement a function that performs checked multiplication on 2 DMatrix
-    pub fn checked_mul(a: &nalgebra::DMatrix<f32>, b: &nalgebra::DMatrix<f32>) -> Result<nalgebra::DMatrix<f32>, String> {
+    pub fn checked_mul(a: &nalgebra::DMatrix<f64>, b: &nalgebra::DMatrix<f64>) -> Result<nalgebra::DMatrix<f64>, String> {
         if a.ncols() != b.nrows() {
             return Err(format!("Matrix dimensions do not match. ({}x{} vs {}x{})", a.nrows(), a.ncols(), b.nrows(), b.ncols()));
         }
@@ -221,7 +221,7 @@ pub mod vmath {
     }
 
     //Implement a function that performs checked multiplication on DMatrix and DVector
-    pub fn checked_mul_mv(a: &nalgebra::DMatrix<f32>, b: &nalgebra::DVector<f32>) -> Result<nalgebra::DVector<f32>, String> {
+    pub fn checked_mul_mv(a: &nalgebra::DMatrix<f64>, b: &nalgebra::DVector<f64>) -> Result<nalgebra::DVector<f64>, String> {
         if a.ncols() != b.len() {
             return Err(format!("Matrix and vector dimensions do not match. ({}x{} vs {}x{})", a.nrows(), a.ncols(), b.len(), 1));
         }
@@ -230,7 +230,7 @@ pub mod vmath {
     }
 
     //Implement a function that performs checked add on 2 DVector
-    pub fn checked_add_v(a: &nalgebra::DVector<f32>, b: &nalgebra::DVector<f32>) -> Result<nalgebra::DVector<f32>, String> {
+    pub fn checked_add_v(a: &nalgebra::DVector<f64>, b: &nalgebra::DVector<f64>) -> Result<nalgebra::DVector<f64>, String> {
         if a.len() != b.len() {
             return Err(format!("Vector dimensions do not match. ({}x{} vs {}x{})", a.len(), 1, b.len(), 1));
         }
@@ -239,7 +239,7 @@ pub mod vmath {
     }
 
     //Implement a function that performs checked mul on 2 DVector
-    pub fn checked_component_mul_v(a: &nalgebra::DVector<f32>, b: &nalgebra::DVector<f32>) -> Result<nalgebra::DVector<f32>, String> {
+    pub fn checked_component_mul_v(a: &nalgebra::DVector<f64>, b: &nalgebra::DVector<f64>) -> Result<nalgebra::DVector<f64>, String> {
         if a.len() != b.len() {
             return Err(format!("Vector dimensions do not match. ({}x{} vs {}x{})", a.len(), 1, b.len(), 1));
         }
@@ -248,7 +248,7 @@ pub mod vmath {
     }
 
     //Implement a function that performs checked sub on 2 DVector
-    pub fn checked_sub_v(a: &nalgebra::DVector<f32>, b: &nalgebra::DVector<f32>) -> Result<nalgebra::DVector<f32>, String> {
+    pub fn checked_sub_v(a: &nalgebra::DVector<f64>, b: &nalgebra::DVector<f64>) -> Result<nalgebra::DVector<f64>, String> {
         if a.len() != b.len() {
             return Err(format!("Vector dimensions do not match. ({}x{} vs {}x{})", a.len(), 1, b.len(), 1));
         }
@@ -257,7 +257,7 @@ pub mod vmath {
     }
 
     //Implement a function that performs checked dot on 2 DVector
-    pub fn checked_dot_v(a: &nalgebra::DVector<f32>, b: &nalgebra::DVector<f32>) -> Result<f32, String> {
+    pub fn checked_dot_v(a: &nalgebra::DVector<f64>, b: &nalgebra::DVector<f64>) -> Result<f64, String> {
         if a.len() != b.len() {
             return Err(format!("Vector dimensions do not match. ({}x{} vs {}x{})", a.len(), 1, b.len(), 1));
         }
@@ -266,7 +266,7 @@ pub mod vmath {
     }
 
     //Implement a function that performs checked multiplication on DVector and DMatrix
-    pub fn checked_mul_vm(a: &nalgebra::DVector<f32>, b: &nalgebra::DMatrix<f32>) -> Result<nalgebra::DMatrix<f32>, String> {
+    pub fn checked_mul_vm(a: &nalgebra::DVector<f64>, b: &nalgebra::DMatrix<f64>) -> Result<nalgebra::DMatrix<f64>, String> {
         if b.nrows() != 1 {
             return Err(format!("Vector and matrix dimensions do not match. ({}x{} vs {}x{})", 1, a.len(), b.nrows(), b.ncols()));
         }
@@ -275,7 +275,7 @@ pub mod vmath {
     }
 
     //Implement a function that performs checked component division on 2 DMatrix
-    pub fn checked_component_div(a: &nalgebra::DMatrix<f32>, b: &nalgebra::DMatrix<f32>) -> Result<nalgebra::DMatrix<f32>, String> {
+    pub fn checked_component_div(a: &nalgebra::DMatrix<f64>, b: &nalgebra::DMatrix<f64>) -> Result<nalgebra::DMatrix<f64>, String> {
         if a.nrows() != b.nrows() || a.ncols() != b.ncols() {
             return Err(format!("Matrix dimensions do not match. ({}x{} vs {}x{})", a.nrows(), a.ncols(), b.nrows(), b.ncols()));
         }
@@ -284,7 +284,7 @@ pub mod vmath {
     }
 
     //Implement a function that performs checked component division on 2 DVector
-    pub fn checked_component_div_v(a: &nalgebra::DVector<f32>, b: &nalgebra::DVector<f32>) -> Result<nalgebra::DVector<f32>, String> {
+    pub fn checked_component_div_v(a: &nalgebra::DVector<f64>, b: &nalgebra::DVector<f64>) -> Result<nalgebra::DVector<f64>, String> {
         if a.len() != b.len() {
             return Err(format!("Vector dimensions do not match. ({}x{} vs {}x{})", a.len(), 1, b.len(), 1));
         }
@@ -292,14 +292,14 @@ pub mod vmath {
         Ok(a.component_div(b))
     }
 
-    pub fn median(a: &[f32]) -> f32 {
+    pub fn median(a: &[f64]) -> f64 {
         let mut data = a.to_vec();
         data.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
         let mid = data.len() / 2;
 
         if data.len() % 2 == 0 {
-            (data[mid - 1] + data[mid]) / 2_f32
+            (data[mid - 1] + data[mid]) / 2_f64
         }
         else {
             data[mid]

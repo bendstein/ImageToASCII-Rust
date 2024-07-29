@@ -37,7 +37,7 @@ impl<'a> Iterator for ImageTileIter<'a> {
         //Calculate top left corner of tile
         let (w, h) = imageproc::image::GenericImageView::dimensions(self.image);
 
-        let windows_per_row = f32::ceil(w as f32 / self.tile_size as f32) as u32;
+        let windows_per_row = f64::ceil(w as f64 / self.tile_size as f64) as u32;
 
         let row = self.offset / windows_per_row;
         let col = self.offset % windows_per_row;
@@ -78,9 +78,9 @@ impl<'a> Iterator for ConverterIter<'a> {
 
             //Get average color
             let count = next.pixels().count();
-            let mut h = 0_f32;
-            let mut s = 0_f32;
-            let mut v = 0_f32;
+            let mut h = 0_f64;
+            let mut s = 0_f64;
+            let mut v = 0_f64;
 
             //Sum up HSV components
             for (_, _, pixel) in next.pixels() {
@@ -92,9 +92,9 @@ impl<'a> Iterator for ConverterIter<'a> {
 
             //Take average of each and convert back to RGB
             let rgb = converter_utils::hsv_to_rgb((
-                h / count as f32,
-                s / count as f32,
-                v / count as f32
+                h / count as f64,
+                s / count as f64,
+                v / count as f64
             ));
 
             //Convert to u32

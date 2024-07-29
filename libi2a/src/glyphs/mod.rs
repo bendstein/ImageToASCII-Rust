@@ -20,11 +20,11 @@ pub fn generate_glyph(glyph: char, tile_size: u32, font_face: &FontRef, foregrou
 
         let glyph_outline = scaled_font.outline_glyph(font_glyph).unwrap();
         let bounds = glyph_outline.px_bounds();
-        let w = bounds.width();
-        let h = bounds.height();
+        let w = bounds.width() as f64;
+        let h = bounds.height() as f64;
 
-        let x = (tile_size as f32 - w) / 2_f32 - bounds.min.x;
-        let y = (tile_size as f32 - h) / 2_f32 - bounds.max.y;
+        let x = (tile_size as f64 - w) / 2_f64 - bounds.min.x as f64;
+        let y = (tile_size as f64 - h) / 2_f64 - bounds.max.y as f64;
 
         imageproc::drawing::draw_text_mut(&mut img, 
             foreground, 

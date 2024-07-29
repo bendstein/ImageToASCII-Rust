@@ -23,56 +23,56 @@ impl SSIMConverter {
         }
     }
 
-    fn calculate_ssim(&self, glyph_image: &DynamicImage, tile: &DynamicImage) -> f32 {
+    fn calculate_ssim(&self, glyph_image: &DynamicImage, tile: &DynamicImage) -> f64 {
         //Get intensities of pixels in each tile
-        let glyph_intensities: Vec<f32> = glyph_image.pixels().map(|p| converter_utils::get_intensity(p.2)).collect();
-        let tile_intensities: Vec<f32> = tile.pixels().map(|p| converter_utils::get_intensity(p.2)).collect();
+        let glyph_intensities: Vec<f64> = glyph_image.pixels().map(|p| converter_utils::get_intensity(p.2)).collect();
+        let tile_intensities: Vec<f64> = tile.pixels().map(|p| converter_utils::get_intensity(p.2)).collect();
 
         let gaussian = converter_utils::gaussian(usize::max(glyph_intensities.len(), tile_intensities.len()));
 
         //Get gaussian-weighted mean intensity of each image (luminance)
-        let glyph_mean: f32 = glyph_intensities.iter()
+        let glyph_mean: f64 = glyph_intensities.iter()
             .enumerate()
             .map(|(ndx, i)| gaussian[ndx] * i)
             .sum();
 
-        let tile_mean: f32 = tile_intensities.iter()
+        let tile_mean: f64 = tile_intensities.iter()
             .enumerate()
             .map(|(ndx, i)| gaussian[ndx] * i)
             .sum();
 
         //Get gaussian-weighted standard deviation of the intensities of each image (contrast)
-        let glyph_stddev: f32 = f32::sqrt(glyph_intensities.iter()
+        let glyph_stddev: f64 = f64::sqrt(glyph_intensities.iter()
             .enumerate()
-            .map(|(ndx, i)| gaussian[ndx] * (i - glyph_mean).powf(2_f32))
+            .map(|(ndx, i)| gaussian[ndx] * (i - glyph_mean).powf(2_f64))
             .sum());
 
-        let tile_stddev: f32 = f32::sqrt(tile_intensities.iter()
+        let tile_stddev: f64 = f64::sqrt(tile_intensities.iter()
             .enumerate()
-            .map(|(ndx, i)| gaussian[ndx] * (i - tile_mean).powf(2_f32))
+            .map(|(ndx, i)| gaussian[ndx] * (i - tile_mean).powf(2_f64))
             .sum());
 
         //Get gaussian-weighted covariance (structure) of the intensities of each tile
-        let mut covar = 0_f32;
+        let mut covar = 0_f64;
 
         for i in 0..usize::min(glyph_intensities.len(), tile_intensities.len()) {
             covar += gaussian[i] * (glyph_intensities[i] - glyph_mean) * (tile_intensities[i] - tile_mean);
         }
 
         //Constants to prevent instability around 0
-        let k1 = (0.001_f32 * 255_f32).powf(2_f32);
-        let k2 = (0.003_f32 * 255_f32).powf(2_f32);
+        let k1 = (0.001_f64 * 255_f64).powf(2_f64);
+        let k2 = (0.003_f64 * 255_f64).powf(2_f64);
 
         //SSIM component weights
-        const W1: f32 = 1.1_f32;
-        const W2: f32 = 0.4_f32;
-        const W3: f32 = 1.75_f32;
+        const W1: f64 = 1.1_f64;
+        const W2: f64 = 0.4_f64;
+        const W3: f64 = 1.75_f64;
 
-        ((W1 * 2_f32 * glyph_mean * tile_mean + k1) * (W3 * 2_f32 * covar + k2))
-        / ((W1 * (glyph_mean.powf(2_f32) + tile_mean.powf(2_f32)) + k1) * (W2 * (glyph_stddev.powf(2_f32) + tile_stddev.powf(2_f32)) + k2))
+        ((W1 * 2_f64 * glyph_mean * tile_mean + k1) * (W3 * 2_f64 * covar + k2))
+        / ((W1 * (glyph_mean.powf(2_f64) + tile_mean.powf(2_f64)) + k1) * (W2 * (glyph_stddev.powf(2_f64) + tile_stddev.powf(2_f64)) + k2))
     }
 
-    fn calculate(&self, glyph: char, tile: &DynamicImage) -> f32 {
+    fn calculate(&self, glyph: char, tile: &DynamicImage) -> f64 {
         let glyph_image = self.glyph_images.get(&glyph)
             .unwrap_or_else(|| panic!("Glyph {glyph} has no image."));
 
@@ -85,10 +85,10 @@ impl SSIMConverter {
             let tmd = u32::max(tw, th);
     
             //Get tile dims
-            let glyph_window_size = f32::ceil(gmd as f32 / 2_f32.powf(self.subdivide as f32)) as u32;
-            let tile_window_size = f32::ceil(tmd as f32 / 2_f32.powf(self.subdivide as f32)) as u32;
+            let glyph_window_size = f64::ceil(gmd as f64 / 2_f64.powf(self.subdivide as f64)) as u32;
+            let tile_window_size = f64::ceil(tmd as f64 / 2_f64.powf(self.subdivide as f64)) as u32;
     
-            let glyph_windows_per_row = f32::ceil(gmd as f32 / glyph_window_size as f32) as u32;
+            let glyph_windows_per_row = f64::ceil(gmd as f64 / glyph_window_size as f64) as u32;
             
             let gaussian = converter_utils::gaussian((glyph_windows_per_row * glyph_windows_per_row) as usize);
 
@@ -106,7 +106,7 @@ impl SSIMConverter {
             };
     
             //Aggregate SSIMs to average
-            let mut ssim_sum = 0_f32;
+            let mut ssim_sum = 0_f64;
 
             let mut current_glyph_window: Option<(u32, u32, DynamicImage)> = glyph_iter.next();
             let mut current_tile_window: Option<(u32, u32, DynamicImage)> = tile_iter.next();
@@ -194,7 +194,7 @@ pub struct SSIMPreprocessIterator<'a> {
 }
 
 impl<'a> Iterator for SSIMPreprocessIterator<'a> {
-    type Item = (String, Option<u32>, Vec<f32>, Vec<f32>);
+    type Item = (String, Option<u32>, Vec<f64>, Vec<f64>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some((row, col, next)) = self.image_iter.next() {
@@ -203,9 +203,9 @@ impl<'a> Iterator for SSIMPreprocessIterator<'a> {
 
             //Get average color
             let count = next.pixels().count();
-            let mut h = 0_f32;
-            let mut s = 0_f32;
-            let mut v = 0_f32;
+            let mut h = 0_f64;
+            let mut s = 0_f64;
+            let mut v = 0_f64;
 
             //Sum up HSV components
             for (_, _, pixel) in next.pixels() {
@@ -217,24 +217,24 @@ impl<'a> Iterator for SSIMPreprocessIterator<'a> {
 
             //Take average of each and convert back to RGB
             let rgb = converter_utils::hsv_to_rgb((
-                h / count as f32,
-                s / count as f32,
-                v / count as f32
+                h / count as f64,
+                s / count as f64,
+                v / count as f64
             ));
 
             //Convert to u32
             let color = converter_utils::get_color((rgb.0, rgb.1, rgb.2));
 
             //Calculate SSIM for all glyphs
-            let ssims: Vec<(char, f32)> = self.parent.glyphs.par_iter()
+            let ssims: Vec<(char, f64)> = self.parent.glyphs.par_iter()
                 .map(|glyph| (*glyph, self.parent.calculate(*glyph, &next)))
-                .collect::<Vec<(char, f32)>>()
+                .collect::<Vec<(char, f64)>>()
                 .clone();
 
             //Get best match
             let best_match = ssims.iter()
                 .reduce(|a, b| if a.1 > b.1 || (a.1 == b.1 && a.0 < b.0) { a } else { b })
-                .unwrap_or(&(' ', 0_f32));
+                .unwrap_or(&(' ', 0_f64));
 
             //Yield best matching glyph, intensities, and all SSIMs
             Some((format!("{}{}", if newline { "\r\n" } else { "" }, best_match.0), Some(color),
