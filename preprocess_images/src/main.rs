@@ -65,23 +65,23 @@ fn main() -> Result<(), String> {
     //Generate images for all glyphs (include whitespace only if not using color)
     let glyphs: Vec<char> = config.general.glyphs
         .iter()
-        .filter(|c| use_color || !c.is_whitespace())
+        .filter(|c| !use_color || !c.is_whitespace())
         .copied()
         .collect();
     
     let mut glyph_images: HashMap<char, DynamicImage> = HashMap::new();
     
-    for glyph in glyphs {
-        let glyph_image = libi2a::glyphs::generate_glyph(glyph, 
+    for glyph in &glyphs {
+        let glyph_image = libi2a::glyphs::generate_glyph(*glyph, 
             config.ssim.tile_size,
             &font,
             if invert { white } else { black },
             if invert { black } else { white });
             
-        glyph_images.insert(glyph, glyph_image);
+        glyph_images.insert(*glyph, glyph_image);
     }
     
-    let converter = SSIMConverter::new(config.ssim.tile_size, config.ssim.subdivide, glyph_images);
+    let converter = SSIMConverter::new(config.ssim.tile_size, config.ssim.subdivide, glyphs, glyph_images);
     
     if use_color {
         _ = colored::control::set_virtual_terminal(true);

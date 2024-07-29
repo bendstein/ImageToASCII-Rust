@@ -160,6 +160,7 @@ pub mod config {
     #[derive(Deserialize)]
     pub struct GeneralConfig {
         pub render_method: String,
+        pub model: String,
         pub glyphs: Vec<char>
     }
 
@@ -188,5 +189,120 @@ pub mod config {
 
         toml::from_str(&config)
             .map_err(|err| format!("Failed to parse config. {err}"))
+    }
+}
+
+pub mod vmath {
+    //Implement a function that performs checked addition on 2 DMatrix
+    pub fn checked_add(a: &nalgebra::DMatrix<f32>, b: &nalgebra::DMatrix<f32>) -> Result<nalgebra::DMatrix<f32>, String> {
+        if a.nrows() != b.nrows() || a.ncols() != b.ncols() {
+            return Err(format!("Matrix dimensions do not match. ({}x{} vs {}x{})", a.nrows(), a.ncols(), b.nrows(), b.ncols()));
+        }
+
+        Ok(a + b)
+    }
+
+    //Implement a function that performs checked subtraction on 2 DMatrix
+    pub fn checked_sub(a: &nalgebra::DMatrix<f32>, b: &nalgebra::DMatrix<f32>) -> Result<nalgebra::DMatrix<f32>, String> {
+        if a.nrows() != b.nrows() || a.ncols() != b.ncols() {
+            return Err(format!("Matrix dimensions do not match. ({}x{} vs {}x{})", a.nrows(), a.ncols(), b.nrows(), b.ncols()));
+        }
+
+        Ok(a - b)
+    }
+
+    //Implement a function that performs checked multiplication on 2 DMatrix
+    pub fn checked_mul(a: &nalgebra::DMatrix<f32>, b: &nalgebra::DMatrix<f32>) -> Result<nalgebra::DMatrix<f32>, String> {
+        if a.ncols() != b.nrows() {
+            return Err(format!("Matrix dimensions do not match. ({}x{} vs {}x{})", a.nrows(), a.ncols(), b.nrows(), b.ncols()));
+        }
+
+        Ok(a * b)
+    }
+
+    //Implement a function that performs checked multiplication on DMatrix and DVector
+    pub fn checked_mul_mv(a: &nalgebra::DMatrix<f32>, b: &nalgebra::DVector<f32>) -> Result<nalgebra::DVector<f32>, String> {
+        if a.ncols() != b.len() {
+            return Err(format!("Matrix and vector dimensions do not match. ({}x{} vs {}x{})", a.nrows(), a.ncols(), b.len(), 1));
+        }
+
+        Ok(a * b)
+    }
+
+    //Implement a function that performs checked add on 2 DVector
+    pub fn checked_add_v(a: &nalgebra::DVector<f32>, b: &nalgebra::DVector<f32>) -> Result<nalgebra::DVector<f32>, String> {
+        if a.len() != b.len() {
+            return Err(format!("Vector dimensions do not match. ({}x{} vs {}x{})", a.len(), 1, b.len(), 1));
+        }
+
+        Ok(a + b)
+    }
+
+    //Implement a function that performs checked mul on 2 DVector
+    pub fn checked_component_mul_v(a: &nalgebra::DVector<f32>, b: &nalgebra::DVector<f32>) -> Result<nalgebra::DVector<f32>, String> {
+        if a.len() != b.len() {
+            return Err(format!("Vector dimensions do not match. ({}x{} vs {}x{})", a.len(), 1, b.len(), 1));
+        }
+
+        Ok(a.component_mul(b))
+    }
+
+    //Implement a function that performs checked sub on 2 DVector
+    pub fn checked_sub_v(a: &nalgebra::DVector<f32>, b: &nalgebra::DVector<f32>) -> Result<nalgebra::DVector<f32>, String> {
+        if a.len() != b.len() {
+            return Err(format!("Vector dimensions do not match. ({}x{} vs {}x{})", a.len(), 1, b.len(), 1));
+        }
+
+        Ok(a - b)
+    }
+
+    //Implement a function that performs checked dot on 2 DVector
+    pub fn checked_dot_v(a: &nalgebra::DVector<f32>, b: &nalgebra::DVector<f32>) -> Result<f32, String> {
+        if a.len() != b.len() {
+            return Err(format!("Vector dimensions do not match. ({}x{} vs {}x{})", a.len(), 1, b.len(), 1));
+        }
+
+        Ok(a.dot(b))
+    }
+
+    //Implement a function that performs checked multiplication on DVector and DMatrix
+    pub fn checked_mul_vm(a: &nalgebra::DVector<f32>, b: &nalgebra::DMatrix<f32>) -> Result<nalgebra::DMatrix<f32>, String> {
+        if b.nrows() != 1 {
+            return Err(format!("Vector and matrix dimensions do not match. ({}x{} vs {}x{})", 1, a.len(), b.nrows(), b.ncols()));
+        }
+
+        Ok(a * b)
+    }
+
+    //Implement a function that performs checked component division on 2 DMatrix
+    pub fn checked_component_div(a: &nalgebra::DMatrix<f32>, b: &nalgebra::DMatrix<f32>) -> Result<nalgebra::DMatrix<f32>, String> {
+        if a.nrows() != b.nrows() || a.ncols() != b.ncols() {
+            return Err(format!("Matrix dimensions do not match. ({}x{} vs {}x{})", a.nrows(), a.ncols(), b.nrows(), b.ncols()));
+        }
+
+        Ok(a.component_div(b))
+    }
+
+    //Implement a function that performs checked component division on 2 DVector
+    pub fn checked_component_div_v(a: &nalgebra::DVector<f32>, b: &nalgebra::DVector<f32>) -> Result<nalgebra::DVector<f32>, String> {
+        if a.len() != b.len() {
+            return Err(format!("Vector dimensions do not match. ({}x{} vs {}x{})", a.len(), 1, b.len(), 1));
+        }
+
+        Ok(a.component_div(b))
+    }
+
+    pub fn median(a: &[f32]) -> f32 {
+        let mut data = a.to_vec();
+        data.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let mid = data.len() / 2;
+
+        if data.len() % 2 == 0 {
+            (data[mid - 1] + data[mid]) / 2_f32
+        }
+        else {
+            data[mid]
+        }
     }
 }

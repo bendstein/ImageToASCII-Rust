@@ -56,12 +56,7 @@ fn main() -> Result<(), String> {
 
     let converter: Box<dyn Converter> = match config.general.render_method.as_str(){
         METHOD_MODEL => {
-            let model_path = match args.get("--model") {
-                Some(Some(p)) => Ok(p.clone()),
-                _ => Err(String::from("Model path is required."))
-            }?;
-
-            let model = libi2a::converter::model::Model::load_from_file(&model_path)?;
+            let model = libi2a::converter::model::Model::load_from_file(&config.general.model)?;
 
             Ok(Box::new(ModelConverter::new(model)) as Box<dyn Converter>)
         },
@@ -76,23 +71,23 @@ fn main() -> Result<(), String> {
             //Generate images for all glyphs (include whitespace only if not using color)
             let glyphs: Vec<char> = config.general.glyphs
                 .iter()
-                .filter(|c| use_color || !c.is_whitespace())
+                .filter(|c| !use_color || !c.is_whitespace())
                 .copied()
                 .collect();
 
             let mut glyph_images: HashMap<char, DynamicImage> = HashMap::new();
 
-            for glyph in glyphs {
-                let glyph_image = libi2a::glyphs::generate_glyph(glyph, 
+            for glyph in &glyphs {
+                let glyph_image = libi2a::glyphs::generate_glyph(*glyph, 
                     config.ssim.tile_size,
                     &font,
                     if invert { white } else { black },
                     if invert { black } else { white });
 
-                glyph_images.insert(glyph, glyph_image);
+                glyph_images.insert(*glyph, glyph_image);
             }
 
-            Ok(Box::new(SSIMConverter::new(config.ssim.tile_size, config.ssim.subdivide, glyph_images)) as Box<dyn Converter>)
+            Ok(Box::new(SSIMConverter::new(config.ssim.tile_size, config.ssim.subdivide, glyphs, glyph_images)) as Box<dyn Converter>)
         },
         _ => Err(format!("Invalid method {}", config.general.render_method))
     }?;

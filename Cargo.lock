@@ -478,6 +478,7 @@ dependencies = [
  "rand",
  "rand_distr",
  "rayon",
+ "utils",
 ]
 
 [[package]]
@@ -1174,6 +1175,7 @@ name = "utils"
 version = "0.0.1"
 dependencies = [
  "imageproc",
+ "nalgebra 0.33.0",
  "serde",
  "toml",
 ]

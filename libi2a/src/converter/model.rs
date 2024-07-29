@@ -4,8 +4,11 @@ use imageproc::image::GenericImageView;
 use nalgebra::{DMatrix, DVector};
 use rand_distr::Distribution;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use utils::vmath;
 
 use super::{converter_utils, Converter};
+
+type BackpropData = (Vec<DMatrix<f32>>, Vec<DVector<f32>>);
 
 #[derive(Clone)]
 pub struct Model {
@@ -54,7 +57,7 @@ pub struct Adam {
 
 impl ModelConverter {
     const ADAM_EPS: f32 = 1e-8_f32;
-    
+
     pub fn new(model: Model) -> Self {
         Self {
             model
@@ -63,22 +66,16 @@ impl ModelConverter {
 
     pub fn train_model(model_initial: &Model, params: &ModelTrainingParams, examples: &mut dyn Iterator<Item=ModelTrainingExample>,
         log: &dyn Fn(String, bool), on_epoch_complete: &dyn Fn(&Model) -> Result<(), String>) -> Result<Model, String> {
-
-        let err = |msg: &str| -> Result<Model, String> {
-            log(msg.to_string(), true);
-            Err(msg.to_string())
-        };
-
         if model_initial.glyphs.is_empty() {
-            return err("Model has no glyphs");
+            return Err("Model has no glyphs".to_string());
         }
 
         if model_initial.weights.is_empty() || model_initial.biases.is_empty() {
-            return err("Model has no weights or biases");
+            return Err("Model has no weights or biases".to_string());
         }
 
         if model_initial.weights.len() != model_initial.biases.len() {
-            return err("Model weights and biases count mismatch");
+            return Err("Model weights and biases count mismatch".to_string());
         }
 
         let mut epoch = 0;
@@ -97,57 +94,89 @@ impl ModelConverter {
 
             //Calculate class weights as being inversely proportional to frequency and confidence
             let batch_ssim_freq = batch.iter().map(|ex| ex.normalized_ssims())
-                .fold(DVector::zeros(model.glyphs.len()), |acc, ssim| acc + ssim);
+                .try_fold(DVector::zeros(model.glyphs.len()), |acc, ssim| vmath::checked_add_v(&acc, &ssim))
+                .map_err(|e| format!("Failed to calculate class weights: {e}"))?;
 
-            //Z-score normalize
-            let batch_ssim_mean = batch_ssim_freq.mean();
-            let batch_ssim_stddev = batch_ssim_freq.map(|s| (s - batch_ssim_mean).powi(2)).sum().sqrt();
+            // //Z-score normalize
+            // let batch_ssim_mean = batch_ssim_freq.mean();
+            // let batch_ssim_stddev = batch_ssim_freq.map(|s| (s - batch_ssim_mean).powi(2)).sum().sqrt();
 
-            let batch_ssim_freq = if batch_ssim_stddev == 0_f32 {
-                batch_ssim_freq.clone()
-            }
-            else {
-                batch_ssim_freq.map(|s| (s - batch_ssim_mean) / batch_ssim_stddev)
-            };
+            // let batch_ssim_freq_normalized = if batch_ssim_stddev == 0_f32 {
+            //     batch_ssim_freq
+            // }
+            // else {
+            //     batch_ssim_freq.map(|s| (s - batch_ssim_mean) / batch_ssim_stddev)
+            // };
 
             //Scale to be in the range 0-1
             let batch_ssim_freq_min = batch_ssim_freq.min();
-            let batch_ssim_freq_max = batch_ssim_freq.max();
-            let batch_ssim_freq = batch_ssim_freq
-                .map(|s| (s - batch_ssim_freq_min) / (if batch_ssim_freq_max == 0_f32 { 1_f32 } else { batch_ssim_freq_max }));
+
+            let batch_ssim_freq_translated = if batch_ssim_freq_min < 0_f32 {
+                batch_ssim_freq.map(|s| s - batch_ssim_freq_min)
+            }
+            else {
+                batch_ssim_freq
+            };
+
+            let batch_ssim_freq_max = batch_ssim_freq_translated.max();
+
+            let batch_ssim_freq_scaled = if batch_ssim_freq_max <= 1_f32 {
+                batch_ssim_freq_translated
+            }
+            else {
+                batch_ssim_freq_translated.map(|s| s / batch_ssim_freq_max)
+            };
+
+            // let batch_ssim_freq_scaled: nalgebra::Matrix<f32, nalgebra::Dyn, nalgebra::Const<1>, nalgebra::VecStorage<f32, nalgebra::Dyn, nalgebra::Const<1>>> = batch_ssim_freq
+            //     .map(|s| (s - batch_ssim_freq_min) / (if batch_ssim_freq_max == 0_f32 { 1_f32 } else { batch_ssim_freq_max }));
 
             //Calculate class weights using complement of logistic function
             const K: f32 = 8_f32;
             const C: f32 = 0.5_f32;
 
-            let logit = |s: f32| 1_f32 / (1_f32 + (-K * (s - C)).exp());
+            let logistic = |s: f32| 1_f32 / (1_f32 + (-K * (s - C)).exp());
 
-            let class_weights = batch_ssim_freq
-                .map(|s| 1_f32 - logit(s) + logit(0_f32));
+            let class_weights = batch_ssim_freq_scaled
+                .map(|s| 1_f32 - logistic(s) + logistic(0_f32));
 
             //Propagate forwards
             let activations = batch.par_iter()
                 .map(|example| {
-                    let activations = Self::propagate_forwards(&model, example.clone());
+                    let activations = Self::propagate_forwards(&model, example.clone())?;
 
                     //Get last layer
-                    let output = activations.last().unwrap();
+                    let output = activations.last()
+                        .ok_or("Failed to get output layer")?;
 
                     //Compare the activations to the expected value
                     let expected = example.normalized_ssims();
 
                     //Calculate total loss using (weighted) cross-entropy loss
-                    let loss = -expected.dot(&output.map(|a| a.ln()).component_mul(&class_weights));
+                    let weighted_output = vmath::checked_component_mul_v(
+                        &output.map(|a| a.ln()),
+                        &class_weights)
+                        .map_err(|e| format!("Failed to calculate weighted output for cross-entropy loss: {e}"))?;
+                    let loss = -vmath::checked_dot_v(&expected, &weighted_output)
+                        .map_err(|e| format!("Failed to calculate dot product for cross-entropy loss: {e}"))?;
 
                     //Calculate component loss using binary cross-entropy loss
-                    let component_loss = (expected.component_mul(&output.map(|a| a.ln()))
-                        + expected.map(|e| 1_f32 - e).component_mul(&output.map(|a| 1_f32 - a).map(|a| a.ln())))
-                        .component_mul(&class_weights);
+                    let ln_output = output.map(|a| a.ln());
+                    let ln_output_comp = output.map(|a| (1_f32 - a).ln());
+                    let expected_comp = expected.map(|e| 1_f32 - e);
+                    let cel_a = vmath::checked_component_mul_v(&expected, &ln_output)
+                        .map_err(|e| format!("Failed to calculate component loss part A: {e}"))?;
+                    let cel_b = vmath::checked_component_mul_v(&expected_comp, &ln_output_comp)
+                        .map_err(|e| format!("Failed to calculate component loss part B: {e}"))?;
+                    let cel = vmath::checked_add_v(&cel_a, &cel_b)
+                        .map_err(|e| format!("Failed to calculate component loss: {e}"))?;
+                    let component_loss = -vmath::checked_component_mul_v(&cel, &class_weights)
+                        .map_err(|e| format!("Failed to calculate weighted component loss: {e}"))?;
 
                     //Return activations, total loss, and pointwise loss
-                    (activations, loss, component_loss)
+                    Ok((activations, loss, component_loss))
                 })
-                .collect::<Vec<(Vec<DVector<f32>>, f32, DVector<f32>)>>();
+                .collect::<Result<Vec<(Vec<DVector<f32>>, f32, DVector<f32>)>, String>>()
+                .map_err(|e| format!("Failed to propagate forwards. {e}"))?;
 
             //Get average batch loss
             let avg_loss = activations.iter()
@@ -156,21 +185,23 @@ impl ModelConverter {
 
             log(format!("Epoch {epoch} - Average loss: {avg_loss}"), false);
 
-            // //Get average pointwise loss across each batch
-            // let avg_pointwise_loss = activations.iter()
-            //     .map(|(_, _, pointwise)| pointwise)
-            //     .fold(DVector::zeros(model.glyphs.len()), |acc, pointwise| acc + pointwise)
-            //     .map(|p| p / params.batch_size as f32);
+            //Get average pointwise loss across each batch (unused)
+            let _avg_pointwise_loss = activations.iter()
+                .map(|(_, _, pointwise)| pointwise)
+                .fold(DVector::zeros(model.glyphs.len()), |acc, pointwise| acc + pointwise)
+                .map(|p| p / params.batch_size as f32);
 
             //Propagate backwards
             let gradients = batch.par_iter()
                 .zip(activations)
                 .map(|(example, (activations, _, _))| 
                     Self::propagate_backwards(&model, example.clone(), activations, class_weights.clone()))
-                .collect::<Vec<(Vec<DMatrix<f32>>, Vec<DVector<f32>>)>>();
+                .collect::<Result<Vec<(Vec<DMatrix<f32>>, Vec<DVector<f32>>)>, String>>()
+                .map_err(|e| format!("Failed to propagate backwards. {e}"))?;
 
             //Average weights and biases across all trials
-            let first_trial_gradients = gradients.first().unwrap();
+            let first_trial_gradients = gradients.first()
+                .ok_or("Backpropagation resulted in no gradients.")?;
             let mut average_weight_gradients = Vec::<DMatrix<f32>>::new();
             let mut average_bias_gradients = Vec::<DVector<f32>>::new();
 
@@ -179,8 +210,12 @@ impl ModelConverter {
                 let mut bias = DVector::zeros(first_trial_gradients.1[l].nrows());
 
                 for (gweight, gbias) in gradients.iter() {
-                    weight += &gweight[l];
-                    bias += &gbias[l];
+                    let wsum = vmath::checked_add(&weight, &gweight[l])
+                        .map_err(|e| format!("Failed to add weight gradients: {e}"))?;
+                    let bsum = vmath::checked_add_v(&bias, &gbias[l])
+                        .map_err(|e| format!("Failed to add bias gradients: {e}"))?;
+                    weight = wsum;
+                    bias = bsum;
                 }
 
                 average_weight_gradients.push(weight / params.batch_size as f32);
@@ -188,19 +223,21 @@ impl ModelConverter {
             }
 
             //Update weights using Adam
-            model = Self::update_adam_weights(&mut adam, &model, (average_weight_gradients, average_bias_gradients), params.lambda, epoch);
+            model = Self::update_adam_weights(&mut adam, &model, (average_weight_gradients, average_bias_gradients), params.lambda, epoch)
+                .map_err(|e| format!("Failed to update weights. {e}"))?;
 
             //Increment epoch counter
             epoch += 1;
 
             //Save model after each epoch
-            on_epoch_complete(&model)?;
+            on_epoch_complete(&model)
+                .map_err(|e| format!("Failed to perform epoch-complete callback. {e}"))?;
         }
 
         Ok(model)
     }
 
-    fn propagate_forwards(model: &Model, example: ModelTrainingExample) -> Vec<DVector<f32>> {
+    fn propagate_forwards(model: &Model, example: ModelTrainingExample) -> Result<Vec<DVector<f32>>, String> {
         let neurons = example.normalized_intensities();
         let mut activations = vec![neurons];
 
@@ -208,8 +245,11 @@ impl ModelConverter {
             let weights = &model.weights[l];
             let biases = &model.biases[l];
 
-            //Take dot product of weights and neurons, and add bias to get activation inputs
-            let weighted_sum = weights * &activations[l] + biases;
+            //Take product of weights and neurons, and add bias to get activation inputs
+            let product = vmath::checked_mul_mv(weights, &activations[l])
+                .map_err(|e| format!("Failed to multiply weights and activations: {e}"))?;
+            let weighted_sum = vmath::checked_add_v(&product, biases)
+                .map_err(|e| format!("Failed to add bias to weighted sum: {e}"))?;
 
             if l == model.weights.len() - 1 {
                 //Output layer - Softmax
@@ -221,11 +261,11 @@ impl ModelConverter {
             }
         }
 
-        activations
+        Ok(activations)
     }
 
-    fn propagate_backwards(model: &Model, example: ModelTrainingExample, 
-        activations: Vec<DVector<f32>>, class_weights: DVector<f32>) -> (Vec<DMatrix<f32>>, Vec<DVector<f32>>) {
+    fn propagate_backwards(model: &Model, example: ModelTrainingExample,
+        activations: Vec<DVector<f32>>, class_weights: DVector<f32>) -> Result<BackpropData, String> {
         let expected = example.normalized_ssims();
         let mut all_weight_gradients = Vec::<DMatrix<f32>>::new();
         let mut all_bias_gradients = Vec::<DVector<f32>>::new();
@@ -239,49 +279,68 @@ impl ModelConverter {
         }
 
         for l in (0..model.weights.len()).rev() {
-            let neurons = &activations[l];
-            
+            let neurons = &activations[l + 1];
+
             let error_term = if l == model.weights.len() - 1 {
                 //Gradient of cross-entropy loss wrt softmax activation simplifies to predicted - expected
                 //Multiply by class weights
-                (neurons - &expected).component_mul(&class_weights)
+                let diff = vmath::checked_sub_v(neurons, &expected)
+                    .map_err(|e| format!("Failed to calculate gradient for softmax: {e}"))?;
+                let weighted = vmath::checked_component_mul_v(&diff, &class_weights)
+                    .map_err(|e| format!("Failed to calculate weighted gradient for softmax: {e}"))?;
+
+                Result::<DVector<f32>, String>::Ok(weighted)
             }
             else {
                 //Get weights and error terms for next layer
                 let next_weights = &model.weights[l + 1];
-                let next_errors = all_errors.last().unwrap();
+                let next_errors = &all_errors[l + 1];
 
-                //Using chain rule, error term is the transpose of the next layer's weights times it's error term,
+                //Using chain rule, error term is the transpose of the next layer's weights times its error term,
                 //times the derivative of Leaky ReLU
-                (next_weights.transpose() * next_errors)
-                    .component_mul(&neurons.map(|a| if a < 0_f32 { model.alpha } else { 1_f32 }))
-            };
+                let transposed = next_weights.transpose();
+                let product = vmath::checked_mul_mv(&transposed, next_errors)
+                    .map_err(|e| format!("Failed to multiply weights and error terms for leaky ReLU gradient: {e}"))?;
+                let error_term = vmath::checked_component_mul_v(&product, &neurons.map(|a| if a < 0_f32 { model.alpha } else { 1_f32 }))?;
+                Ok(error_term)
+            }?;
 
             //Grad of loss wrt bias is just error
             all_bias_gradients[l] = error_term.clone();
 
             //Grad of loss wrt weights is error * prev activations transpose (chain rule)
-            all_weight_gradients[l] = error_term.clone() * activations[l].transpose();
+            let activations = &activations[l];
+            let mut activations_transpose: DMatrix<f32> = DMatrix::zeros(1, activations.len());
+            for i in 0..activations.len() {
+                activations_transpose[(0, i)] = activations[i];
+            }
+
+            all_weight_gradients[l] = vmath::checked_mul_vm(&error_term, &activations_transpose)
+                .map_err(|e| format!("Failed to multiply error term and activations for weight gradient: {e}"))?;
 
             all_errors[l] = error_term;
         }
 
-        (all_weight_gradients, all_bias_gradients)
+        Ok((all_weight_gradients, all_bias_gradients))
     }
 
     fn update_adam_weights(adam: &mut Adam, model: &Model, gradients: (Vec<DMatrix<f32>>, Vec<DVector<f32>>),
-        l2_coeff: f32, epoch: u32) -> Model {
+        l2_coeff: f32, epoch: u32) -> Result<Model, String> {
         let mut model_clone = model.clone();
         let (gweight, gbias) = gradients;
 
         for l in 0..model.weights.len() {
             //Update adam first moment
-            adam.moment1[l] = &adam.moment1[l] * adam.beta1 + &gweight[l] * (1_f32 - adam.beta1);
-            adam.bias1[l] = &adam.bias1[l] * adam.beta1 + &gbias[l] * (1_f32 - adam.beta1);
+            adam.moment1[l] = vmath::checked_add(&(&adam.moment1[l] * adam.beta1), &(&gweight[l] * (1_f32 - adam.beta1)))
+                .map_err(|e| format!("Failed to update Adam first moment: {e}"))?;
+            adam.bias1[l] = vmath::checked_add_v(&(&adam.bias1[l] * adam.beta1), &(&gbias[l] * (1_f32 - adam.beta1)))
+                .map_err(|e| format!("Failed to update Adam first bias: {e}"))?;
 
             //Update second moment
-            adam.moment2[l] = &adam.moment2[l] * adam.beta2 + &gweight[l].map(|x| x * x) * (1_f32 - adam.beta2);
-            adam.bias2[l] = &adam.bias2[l] * adam.beta2 + &gbias[l].map(|x| x * x) * (1_f32 - adam.beta2);
+            adam.moment2[l] = vmath::checked_add(&(&adam.moment2[l] * adam.beta2), &(&gweight[l].map(|x| x * x) * (1_f32 - adam.beta2)))
+                .map_err(|e| format!("Failed to update Adam second moment: {e}"))?;
+            adam.bias2[l] = vmath::checked_add_v(&(&adam.bias2[l] * adam.beta2), &(&gbias[l].map(|x| x * x) * (1_f32 - adam.beta2)))
+                .map_err(|e| format!("Failed to update Adam second bias: {e}"))?;
 
             //Compute bias-corrected first moment
             let moment1_corrected = &adam.moment1[l] / (1_f32 - adam.beta1.powi(epoch as i32 + 1));
@@ -292,16 +351,24 @@ impl ModelConverter {
             let bias2_corrected = &adam.bias2[l] / (1_f32 - adam.beta2.powi(epoch as i32 + 1));
 
             //Compute learning rates (L2 regularized for weight learning rate)
-            let learning_rate = moment1_corrected.component_div(&(moment2_corrected.map(|x| x.sqrt() + Self::ADAM_EPS)))
-                + (l2_coeff * &model.weights[l]);
-            let bias_learning_rate = bias1_corrected.component_div(&(bias2_corrected.map(|x| x.sqrt() + Self::ADAM_EPS)));
+            let learning_rate_unregularized = vmath::checked_component_div(&moment1_corrected, &moment2_corrected.map(|x| x.sqrt() + Self::ADAM_EPS))
+                .map_err(|e| format!("Failed to calculate learning rate: {e}"))?;
+            let learning_rate = vmath::checked_add(&learning_rate_unregularized, &(&model.weights[l] * l2_coeff))
+                .map_err(|e| format!("Failed to add L2 regularization to learning rate: {e}"))?;
+            let bias_learning_rate = vmath::checked_component_div_v(&bias1_corrected, &bias2_corrected.map(|x| x.sqrt() + Self::ADAM_EPS))
+                .map_err(|e| format!("Failed to calculate bias learning rate: {e}"))?;
 
             //Update weights and biases
-            model_clone.weights[l] -= adam.learning_rate * learning_rate;
-            model_clone.biases[l] -= adam.learning_rate * bias_learning_rate;
+            let updated_weights = vmath::checked_sub(&model_clone.weights[l], &(adam.learning_rate * learning_rate))
+                .map_err(|e| format!("Failed to update weights: {e}"))?;
+            model_clone.weights[l] = updated_weights;
+
+            let updated_biases = vmath::checked_sub_v(&model_clone.biases[l], &(adam.learning_rate * bias_learning_rate))
+                .map_err(|e| format!("Failed to update biases: {e}"))?;
+            model_clone.biases[l] = updated_biases;
         }
 
-        model_clone
+        Ok(model_clone)
     }
 
     fn normalized_softmax(input: DVector<f32>) -> DVector<f32> {
@@ -320,8 +387,14 @@ impl Converter for ModelConverter {
         let example = ModelTrainingExample::new(intensities, vec![0_f32; self.model.glyphs.len()]);
         
         //Send tile through the neural net
-        let activations: Vec<DVector<f32>> = Self::propagate_forwards(&self.model, example);
-        
+        let maybe_activations: Result<Vec<DVector<f32>>, String> = Self::propagate_forwards(&self.model, example);
+
+        if maybe_activations.is_err() {
+            return ' ';
+        }
+
+        let activations = maybe_activations.unwrap();
+
         if activations.is_empty() {
             return ' ';
         }
@@ -345,10 +418,7 @@ impl Converter for ModelConverter {
     }
     
     fn get_tile_size(&self) -> u32 {
-        self.model.weights
-            .first()
-            .map(|w| w.nrows() as f32)
-            .unwrap_or(0_f32)
+        (self.model.feature_count() as f32)
             .sqrt()
             .round() as u32
     }
@@ -389,14 +459,28 @@ impl Model {
             .map(|_| ())
     }
 
+    pub fn feature_count(&self) -> usize {
+        self.weights
+            .first()
+            .map(|w| w.ncols() as f32)
+            .unwrap_or(0_f32)
+            as usize
+    }
+
+    pub fn output_count(&self) -> usize {
+        self.glyphs.len()
+    }
+
     fn init_weights_he_normal(params: &ModelInitParams) -> (Vec<DMatrix<f32>>, Vec<DVector<f32>>) {
         let mut weights = Vec::new();
         let mut biases = Vec::new();
 
         let mut rng = rand::thread_rng();
 
-        for i in 0..(params.hidden_layer_count + 1) {
-            let activations_count = if i == 0 { params.glyphs.len() } else { params.hidden_layer_neuron_count as usize };
+        let layers = params.hidden_layer_count + 1;
+
+        for i in 0..layers {
+            let activations_count = if i == layers - 1 { params.glyphs.len() } else { params.hidden_layer_neuron_count as usize };
             let neuron_count = if i == 0 { params.feature_count } else { params.hidden_layer_neuron_count } as usize;
 
             let mut weight = DMatrix::zeros(activations_count, neuron_count);
@@ -440,7 +524,7 @@ impl TryFrom<Vec<u8>> for Model {
         let mut offset = 0_usize;
 
         //Read number of glyphs
-        let glyph_count = usize::from_le_bytes(value[offset..offset + std::mem::size_of::<usize>()].try_into()
+        let glyph_count = usize::from_le_bytes(value[offset..offset + size_of::<usize>()].try_into()
             .map_err(|e| format!("Failed to read number of glyphs. {e}"))?);
         offset += size_of::<usize>();
 
@@ -461,28 +545,31 @@ impl TryFrom<Vec<u8>> for Model {
         }       
 
         //Read alpha
-        let alpha = f32::from_le_bytes(value[offset..offset + std::mem::size_of::<f32>()].try_into()
+        let alpha = f32::from_le_bytes(value[offset..offset + size_of::<f32>()].try_into()
             .map_err(|e| format!("Failed to read alpha. {e}"))?);
         offset += size_of::<f32>();
 
         //Read layer count
-        let layer_count = value[offset];
-        offset += 1;
+        let layer_count = usize::from_le_bytes(value[offset..offset + size_of::<usize>()].try_into()
+            .map_err(|e| format!("Failed to read layer count. {e}"))?);
+        offset += size_of::<usize>();
 
         for _ in 0..layer_count {
-            let rows = value[offset];
-            offset += 1;
+            let rows = usize::from_le_bytes(value[offset..offset + size_of::<usize>()].try_into()
+                .map_err(|e| format!("Failed to read layer row count. {e}"))?);
+            offset += size_of::<usize>();
 
-            let cols = value[offset];
-            offset += 1;
+            let cols = usize::from_le_bytes(value[offset..offset + size_of::<usize>()].try_into()
+                .map_err(|e| format!("Failed to read layer column count. {e}"))?);
+            offset += size_of::<usize>();
 
-            let mut weight = DMatrix::zeros(rows as usize, cols as usize);
-            let mut bias = DVector::zeros(rows as usize);
+            let mut weight = DMatrix::zeros(rows, cols);
+            let mut bias = DVector::zeros(rows);
 
             //Read weights
             for i in 0..rows {
                 for j in 0..cols {
-                    weight[(i as usize, j as usize)] = f32::from_le_bytes(value[offset..offset + size_of::<f32>()].try_into()
+                    weight[(i, j)] = f32::from_le_bytes(value[offset..offset + size_of::<f32>()].try_into()
                         .map_err(|e| format!("Failed to read weight. {e}"))?);
                     offset += size_of::<f32>();
                 }
@@ -490,7 +577,7 @@ impl TryFrom<Vec<u8>> for Model {
 
             //Read biases
             for i in 0..rows {
-                bias[i as usize] = f32::from_le_bytes(value[offset..offset + size_of::<f32>()].try_into()
+                bias[i] = f32::from_le_bytes(value[offset..offset + size_of::<f32>()].try_into()
                     .map_err(|e| format!("Failed to read bias. {e}"))?);
                 offset += size_of::<f32>();
             }
@@ -532,15 +619,15 @@ impl From<&Model> for Vec<u8> {
         result.extend_from_slice(&value.alpha.to_le_bytes());
 
         //Write layer count
-        result.push(value.biases.len() as u8);
+        result.extend_from_slice(&value.biases.len().to_le_bytes());
 
         for l in 0..value.biases.len() {
             let weights = &value.weights[l];
             let biases = &value.biases[l];
 
             //Write dimensions of layer
-            result.push(weights.nrows() as u8);
-            result.push(weights.ncols() as u8);
+            result.extend_from_slice(&weights.nrows().to_le_bytes());
+            result.extend_from_slice(&weights.ncols().to_le_bytes());
 
             //Write weights
             for i in 0..weights.nrows() {
@@ -614,15 +701,48 @@ impl ModelTrainingExample {
     }
 
     pub fn normalized_intensities(&self) -> DVector<f32> {
-        //Z-score normalization
-        let mean = self.intensities.mean();
-        let stddev = self.intensities.map(|i| (i - mean).powi(2)).sum().sqrt();
+        // //Z-score normalization
+        // let mean = self.intensities.mean();
+        // let stddev = self.intensities.map(|i| (i - mean).powi(2)).sum().sqrt();
 
-        if stddev == 0_f32 {
-            self.intensities.clone()
+        // let normalized = if stddev == 0_f32 {
+        //     self.intensities.clone()
+        // }
+        // else {
+        //     self.intensities.map(|i| (i - mean) / stddev)
+        // };
+
+        // //MAD normalization
+        // let median = vmath::median(self.intensities.data.as_vec());
+        // let mad_vector = &self.intensities.map(|i| (i - median).abs());
+        // let mad = vmath::median(mad_vector.data.as_vec());
+
+        // let normalized = if mad == 0_f32 {
+        //     self.intensities.clone()
+        // }
+        // else {
+        //     self.intensities.map(|i| (i - median) / mad)
+        // };
+
+        let normalized = self.intensities.clone();
+
+        //Scale to be in the range 0-1
+        let min = normalized.min();
+        
+        let translated = if min < 0_f32 {
+            normalized.map(|i| i - min)
         }
         else {
-            self.intensities.map(|i| (i - mean) / stddev)
+            normalized
+        };
+
+        let max = translated.max();
+
+        if max <= 1_f32 {
+            translated
+        }
+        else {
+            translated.map(|i| i / max)
         }
     }
 
@@ -630,7 +750,7 @@ impl ModelTrainingExample {
         const COERCE_TO_ZERO: f32 = 1e-9_f32;
         const STD_DEV: f32 = 0.15_f32;
 
-        //Normalize ssims, gaussian weighted by their percentage of the max
+        //Normalize ssims, gaussian weighted by their ratio to the max
         let max = self.ssims.max();
 
         if max == 0_f32 {
@@ -640,8 +760,8 @@ impl ModelTrainingExample {
         //Let gaussian weights be the ssim mapped to the normal curve
         let weights = DVector::from_iterator(self.ssims.nrows(), self.ssims.iter()
         .map(|&s| {
-            let exponent = -((s / max - 1.0).powi(2)) / (2.0 * STD_DEV * STD_DEV);
-            let numerator = (exponent).exp();
+            let exponent = -(s / max - 1.0).powi(2) / (2.0 * STD_DEV * STD_DEV);
+            let numerator = exponent.exp();
             let denominator = (2.0 * std::f32::consts::PI).sqrt() * STD_DEV;
             numerator / denominator
         }));

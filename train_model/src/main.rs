@@ -2,7 +2,6 @@ use std::io::BufRead;
 
 use libi2a::converter::model::{Model, ModelConverter, ModelInitParams, ModelTrainingExample, ModelTrainingParams};
 
-const ARG_PATH: &str = "--path";
 const CFG_PATH: &str = "config.toml";
 
 fn main() -> Result<(), String> {    
@@ -13,12 +12,9 @@ fn main() -> Result<(), String> {
 
     let config = utils::config::read_config(CFG_PATH)?;
 
-    let args = utils::command_line::parse_args(std::env::args(), Some(String::from(ARG_PATH)))?;
+    let args = utils::command_line::parse_args(std::env::args(), None)?;
     
-    let path = match args.get(ARG_PATH) {
-        Some(Some(p)) => Ok(p.clone()),
-        _ => Err(String::from("Model path is required."))
-    }?;
+    let path = config.general.model.clone();
 
     let source = match args.get("--source") {
         Some(Some(p)) => Ok(p.clone()),
@@ -94,6 +90,14 @@ fn main() -> Result<(), String> {
             let outputs: Vec<f32> = parts[1].split(',')
                 .map(|p| p.parse::<f32>().unwrap_or(0_f32))
                 .collect();
+
+            if features.len() != model_initial.feature_count() {
+                return Err(format!("Invalid feature count in line {line}"));
+            }
+
+            if outputs.len() != model_initial.output_count() {
+                return Err(format!("Invalid output count in line {line}"));
+            }
 
             Ok((features, outputs))
         })

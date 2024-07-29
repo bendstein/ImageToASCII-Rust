@@ -9,14 +9,16 @@ use super::{converter_utils, Converter, ImageTileIter};
 pub struct SSIMConverter {
     tile_size: u32,
     subdivide: u32,
+    glyphs: Vec<char>,
     glyph_images: HashMap<char, DynamicImage>
 }
 
 impl SSIMConverter {
-    pub fn new(tile_size: u32, subdivide: u32, glyph_images: HashMap<char, DynamicImage>) -> Self {
+    pub fn new(tile_size: u32, subdivide: u32, glyphs: Vec<char>, glyph_images: HashMap<char, DynamicImage>) -> Self {
         Self {
             tile_size,
             subdivide,
+            glyphs,
             glyph_images
         }
     }
@@ -224,18 +226,14 @@ impl<'a> Iterator for SSIMPreprocessIterator<'a> {
             let color = converter_utils::get_color((rgb.0, rgb.1, rgb.2));
 
             //Calculate SSIM for all glyphs
-            let glyphs: Vec<char> = self.parent.glyph_images.keys().copied().collect();
-
-            let mut ssims: Vec<(char, f32)> = glyphs.par_iter()
+            let ssims: Vec<(char, f32)> = self.parent.glyphs.par_iter()
                 .map(|glyph| (*glyph, self.parent.calculate(*glyph, &next)))
-                .collect();
-
-            //Make sure sorted by character value
-            ssims.sort_by(|a, b| a.0.cmp(&b.0));
+                .collect::<Vec<(char, f32)>>()
+                .clone();
 
             //Get best match
             let best_match = ssims.iter()
-                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .reduce(|a, b| if a.1 > b.1 || (a.1 == b.1 && a.0 < b.0) { a } else { b })
                 .unwrap_or(&(' ', 0_f32));
 
             //Yield best matching glyph, intensities, and all SSIMs
