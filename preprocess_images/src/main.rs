@@ -16,7 +16,7 @@ fn main() -> Result<(), String> {
     
     let args = utils::command_line::parse_args(std::env::args(), Some(String::from(ARG_PATH)))?;
     
-    let config = utils::config::read_config(CFG_PATH)?;
+    let config = utils::config::read_config(CFG_PATH)?.apply_args(&args);
 
     let path = match args.get(ARG_PATH) {
         Some(Some(p)) => Ok(p.clone()),

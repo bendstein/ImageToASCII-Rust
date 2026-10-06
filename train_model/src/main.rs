@@ -10,9 +10,9 @@ fn main() -> Result<(), String> {
         _ = std::env::set_current_dir(exe);
     }
 
-    let config = utils::config::read_config(CFG_PATH)?;
-
     let args = utils::command_line::parse_args(std::env::args(), None)?;
+
+    let config = utils::config::read_config(CFG_PATH)?.apply_args(&args);
     
     let path = config.general.model.clone();
 
@@ -61,7 +61,7 @@ fn main() -> Result<(), String> {
 
     let save_model = |model: &Model, epoch: u32| -> Result<(), String> {        
         //Save model checkpoint
-        if epoch > 0 && epoch % config.training.checkpoint_period == 0 {
+        if epoch > 0 && epoch.is_multiple_of(config.training.checkpoint_period) {
             log(String::from("Saving model checkpoint."), false);
 
             model.save_to_file(format!("{path}.{epoch}.checkpoint").as_str())

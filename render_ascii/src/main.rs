@@ -20,7 +20,7 @@ fn main() -> Result<(), String> {
 
     let args = utils::command_line::parse_args(std::env::args(), Some(String::from(ARG_PATH)))?;
     
-    let config = utils::config::read_config(CFG_PATH)?;
+    let config = utils::config::read_config(CFG_PATH)?.apply_args(&args);
 
     let path = match args.get(ARG_PATH) {
         Some(Some(p)) => Ok(p.clone()),
@@ -32,6 +32,8 @@ fn main() -> Result<(), String> {
     let use_edges = !args.contains_key("--no-edges");
     
     let use_color = !args.contains_key("--no-color");
+
+    let print_details = args.contains_key("--details");
     
     let white = Rgba([255, 255, 255, 255]);
     let black = Rgba([0, 0, 0, 255]);
@@ -57,6 +59,10 @@ fn main() -> Result<(), String> {
     let converter: Box<dyn Converter> = match config.general.render_method.as_str(){
         METHOD_MODEL => {
             let model = libi2a::converter::model::Model::load_from_file(&config.general.model)?;
+
+            if print_details {
+                println!("Model | Feature Count: {} (Tile Size: {}); Glyph Count: {}", model.feature_count(), f64::sqrt(f64::from(u32::try_from(model.feature_count()).unwrap_or(0))), model.output_count());
+            }
 
             Ok(Box::new(ModelConverter::new(model)) as Box<dyn Converter>)
         },
@@ -85,6 +91,10 @@ fn main() -> Result<(), String> {
                     if invert { black } else { white });
 
                 glyph_images.insert(*glyph, glyph_image);
+            }
+
+            if print_details {
+                println!("SSIM | Tile Size: {} ; Subdivide: {} ; Glyph Count: {}", config.ssim.tile_size, config.ssim.subdivide, glyphs.len());
             }
 
             Ok(Box::new(SSIMConverter::new(config.ssim.tile_size, config.ssim.subdivide, glyphs, glyph_images)) as Box<dyn Converter>)

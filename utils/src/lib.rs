@@ -191,10 +191,105 @@ pub mod config {
         toml::from_str(&config)
             .map_err(|err| format!("Failed to parse config. {err}"))
     }
+
+    impl Config {
+        pub fn apply_args(mut self, args: &std::collections::HashMap<String, Option<String>>) -> Self {
+            //Override config values from process args
+            if let Some(Some(arg)) = args.get("--method") {
+                self.general.render_method = arg.clone();
+            }
+            if let Some(Some(arg)) = args.get("--model") {
+                self.general.model = arg.clone();
+            }
+            
+            if let Some(Some(arg)) = args.get("--font") {
+                self.ssim.font = arg.clone();
+            }
+            if let Some(Some(arg)) = args.get("--subdivide") {
+                if let Ok(parsed) = arg.parse::<u32>() {
+                    if parsed > 0 {
+                        self.ssim.subdivide = parsed;
+                    }
+                }
+            }
+            if let Some(Some(arg)) = args.get("--tile-size") {
+                if let Ok(parsed) = arg.parse::<u32>() {
+                    if parsed > 0 {
+                        self.ssim.tile_size = parsed;
+                    }
+                }
+            }
+
+            if let Some(Some(arg)) = args.get("--hidden-layers") {
+                if let Ok(parsed) = arg.parse::<u32>() {
+                    if parsed > 0 {
+                        self.training.hidden_layers = parsed;
+                    }
+                }
+            }
+            if let Some(Some(arg)) = args.get("--hidden-neurons") {
+                if let Ok(parsed) = arg.parse::<u32>() {
+                    if parsed > 0 {
+                        self.training.hidden_neurons = parsed;
+                    }
+                }
+            }
+            if let Some(Some(arg)) = args.get("--alpha") {
+                if let Ok(parsed) = arg.parse::<f64>() {
+                    if parsed > 0. {
+                        self.training.alpha = parsed;
+                    }
+                }
+            }
+            if let Some(Some(arg)) = args.get("--l2") {
+                if let Ok(parsed) = arg.parse::<f64>() {
+                    if parsed > 0. {
+                        self.training.l2 = parsed;
+                    }
+                }
+            }
+            if let Some(Some(arg)) = args.get("--learning-rate") {
+                if let Ok(parsed) = arg.parse::<f64>() {
+                    if parsed > 0. {
+                        self.training.learning_rate = parsed;
+                    }
+                }
+            }
+            if let Some(Some(arg)) = args.get("--adam-beta-1") {
+                if let Ok(parsed) = arg.parse::<f64>() {
+                    if parsed > 0. {
+                        self.training.adam_beta1 = parsed;
+                    }
+                }
+            }
+            if let Some(Some(arg)) = args.get("--adam-beta-2") {
+                if let Ok(parsed) = arg.parse::<f64>() {
+                    if parsed > 0. {
+                        self.training.adam_beta2 = parsed;
+                    }
+                }
+            }
+            if let Some(Some(arg)) = args.get("--batch-size") {
+                if let Ok(parsed) = arg.parse::<u32>() {
+                    if parsed > 0 {
+                        self.training.batch_size = parsed;
+                    }
+                }
+            }
+            if let Some(Some(arg)) = args.get("--checkpoint-period") {
+                if let Ok(parsed) = arg.parse::<u32>() {
+                    if parsed > 0 {
+                        self.training.checkpoint_period = parsed;
+                    }
+                }
+            }
+
+            self
+        }
+    }
 }
 
 pub mod vmath {
-    //Implement a function that performs checked addition on 2 DMatrix
     pub fn checked_add(a: &nalgebra::DMatrix<f64>, b: &nalgebra::DMatrix<f64>) -> Result<nalgebra::DMatrix<f64>, String> {
         if a.nrows() != b.nrows() || a.ncols() != b.ncols() {
             return Err(format!("Matrix dimensions do not match. ({}x{} vs {}x{})", a.nrows(), a.ncols(), b.nrows(), b.ncols()));
@@ -203,7 +298,6 @@ pub mod vmath {
         Ok(a + b)
     }
 
-    //Implement a function that performs checked subtraction on 2 DMatrix
     pub fn checked_sub(a: &nalgebra::DMatrix<f64>, b: &nalgebra::DMatrix<f64>) -> Result<nalgebra::DMatrix<f64>, String> {
         if a.nrows() != b.nrows() || a.ncols() != b.ncols() {
             return Err(format!("Matrix dimensions do not match. ({}x{} vs {}x{})", a.nrows(), a.ncols(), b.nrows(), b.ncols()));
@@ -212,7 +306,6 @@ pub mod vmath {
         Ok(a - b)
     }
 
-    //Implement a function that performs checked multiplication on 2 DMatrix
     pub fn checked_mul(a: &nalgebra::DMatrix<f64>, b: &nalgebra::DMatrix<f64>) -> Result<nalgebra::DMatrix<f64>, String> {
         if a.ncols() != b.nrows() {
             return Err(format!("Matrix dimensions do not match. ({}x{} vs {}x{})", a.nrows(), a.ncols(), b.nrows(), b.ncols()));
@@ -221,7 +314,6 @@ pub mod vmath {
         Ok(a * b)
     }
 
-    //Implement a function that performs checked multiplication on DMatrix and DVector
     pub fn checked_mul_mv(a: &nalgebra::DMatrix<f64>, b: &nalgebra::DVector<f64>) -> Result<nalgebra::DVector<f64>, String> {
         if a.ncols() != b.len() {
             return Err(format!("Matrix and vector dimensions do not match. ({}x{} vs {}x{})", a.nrows(), a.ncols(), b.len(), 1));
@@ -230,7 +322,6 @@ pub mod vmath {
         Ok(a * b)
     }
 
-    //Implement a function that performs checked add on 2 DVector
     pub fn checked_add_v(a: &nalgebra::DVector<f64>, b: &nalgebra::DVector<f64>) -> Result<nalgebra::DVector<f64>, String> {
         if a.len() != b.len() {
             return Err(format!("Vector dimensions do not match. ({}x{} vs {}x{})", a.len(), 1, b.len(), 1));
@@ -239,7 +330,6 @@ pub mod vmath {
         Ok(a + b)
     }
 
-    //Implement a function that performs checked mul on 2 DVector
     pub fn checked_component_mul_v(a: &nalgebra::DVector<f64>, b: &nalgebra::DVector<f64>) -> Result<nalgebra::DVector<f64>, String> {
         if a.len() != b.len() {
             return Err(format!("Vector dimensions do not match. ({}x{} vs {}x{})", a.len(), 1, b.len(), 1));
@@ -248,7 +338,6 @@ pub mod vmath {
         Ok(a.component_mul(b))
     }
 
-    //Implement a function that performs checked sub on 2 DVector
     pub fn checked_sub_v(a: &nalgebra::DVector<f64>, b: &nalgebra::DVector<f64>) -> Result<nalgebra::DVector<f64>, String> {
         if a.len() != b.len() {
             return Err(format!("Vector dimensions do not match. ({}x{} vs {}x{})", a.len(), 1, b.len(), 1));
@@ -257,7 +346,6 @@ pub mod vmath {
         Ok(a - b)
     }
 
-    //Implement a function that performs checked dot on 2 DVector
     pub fn checked_dot_v(a: &nalgebra::DVector<f64>, b: &nalgebra::DVector<f64>) -> Result<f64, String> {
         if a.len() != b.len() {
             return Err(format!("Vector dimensions do not match. ({}x{} vs {}x{})", a.len(), 1, b.len(), 1));
@@ -266,7 +354,6 @@ pub mod vmath {
         Ok(a.dot(b))
     }
 
-    //Implement a function that performs checked multiplication on DVector and DMatrix
     pub fn checked_mul_vm(a: &nalgebra::DVector<f64>, b: &nalgebra::DMatrix<f64>) -> Result<nalgebra::DMatrix<f64>, String> {
         if b.nrows() != 1 {
             return Err(format!("Vector and matrix dimensions do not match. ({}x{} vs {}x{})", 1, a.len(), b.nrows(), b.ncols()));
@@ -275,7 +362,6 @@ pub mod vmath {
         Ok(a * b)
     }
 
-    //Implement a function that performs checked component division on 2 DMatrix
     pub fn checked_component_div(a: &nalgebra::DMatrix<f64>, b: &nalgebra::DMatrix<f64>) -> Result<nalgebra::DMatrix<f64>, String> {
         if a.nrows() != b.nrows() || a.ncols() != b.ncols() {
             return Err(format!("Matrix dimensions do not match. ({}x{} vs {}x{})", a.nrows(), a.ncols(), b.nrows(), b.ncols()));
@@ -284,7 +370,6 @@ pub mod vmath {
         Ok(a.component_div(b))
     }
 
-    //Implement a function that performs checked component division on 2 DVector
     pub fn checked_component_div_v(a: &nalgebra::DVector<f64>, b: &nalgebra::DVector<f64>) -> Result<nalgebra::DVector<f64>, String> {
         if a.len() != b.len() {
             return Err(format!("Vector dimensions do not match. ({}x{} vs {}x{})", a.len(), 1, b.len(), 1));
@@ -299,7 +384,7 @@ pub mod vmath {
 
         let mid = data.len() / 2;
 
-        if data.len() % 2 == 0 {
+        if data.len().is_multiple_of(2) {
             (data[mid - 1] + data[mid]) / 2_f64
         }
         else {
