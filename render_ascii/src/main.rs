@@ -34,6 +34,11 @@ fn main() -> Result<(), String> {
     let use_color = !args.contains_key("--no-color");
 
     let print_details = args.contains_key("--details");
+
+    let width = match args.get("--width") {
+        Some(Some(w)) => w.parse::<u32>().unwrap_or(1),
+        _ => 1
+    }.max(1);
     
     let white = Rgba([255, 255, 255, 255]);
     let black = Rgba([0, 0, 0, 255]);
@@ -108,6 +113,18 @@ fn main() -> Result<(), String> {
 
     //Convert and print image glyphs
     for (glyph, maybe_color) in (*converter).convert(&to_convert) {
+        //Handle new lines separately so that they ignore width
+        let new_line = glyph.starts_with("\r\n");
+
+        let glyph_without_newline = match new_line {
+            true => &glyph[2..],
+            _ => glyph.as_str()
+        };
+
+        if new_line {
+            println!();
+        }
+
         if let Some(color) = maybe_color {
             if use_color {
                 let r = ((color >> 16) & 255) as u8;
@@ -116,15 +133,22 @@ fn main() -> Result<(), String> {
                 
                 let color = colored::Color::TrueColor { r, g, b };
                 
-                let colored = colored::ColoredString::from(glyph.to_string()).color(color);
-                print!("{colored}");
+                let colored = colored::ColoredString::from(glyph_without_newline).color(color);
+
+                for _ in 1..=width {
+                    print!("{colored}");
+                }                
             }
             else {
-                print!("{glyph}");   
+                for _ in 1..=width {
+                    print!("{glyph_without_newline}");
+                }
             }
         }
         else {
-            print!("{glyph}");
+            for _ in 1..=width {
+                print!("{glyph_without_newline}");
+            }
         }
     }
     
